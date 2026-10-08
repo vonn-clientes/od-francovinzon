@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /gestion/
+Disallow: /pacientes/
+Disallow: /admin/
+Disallow: /api/
+Disallow: /turno/
+Disallow: /t/
+Disallow: /mobilephotouploaderodfrancovinzon/
+
+Sitemap: https://od-francovinzon.vercel.app/sitemap.xml

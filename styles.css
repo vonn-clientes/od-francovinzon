@@ -32,6 +32,8 @@ h1, h2, h3 {
   color: var(--navy);
   font-weight: 600;
   letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-wrap: balance;
 }
 
 .accent { color: #2F6FB0; font-style: italic; }

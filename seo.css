@@ -53,3 +53,6 @@ ul.cols li { break-inside: avoid; }
 .footer-links a { opacity: .85; }
 .footer-links a:hover { opacity: 1; text-decoration: underline; }
 .footer-links--home { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 8px 22px; margin-top: 28px; }
+
+.doctor-facts { list-style: none; padding: 0; margin: 0 0 18px; display: flex; flex-wrap: wrap; gap: 8px; }
+.doctor-facts li { background: #eef3f9; color: #1E3A5F; border-radius: 999px; padding: 6px 14px; font-size: .9rem; font-weight: 600; }

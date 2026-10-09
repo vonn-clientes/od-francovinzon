@@ -389,7 +389,9 @@ h1, h2, h3 {
 /* ---- Crédito VONN ---- */
 .made-by { display: flex; align-items: center; justify-content: center; gap: 10px; width: fit-content; margin: 28px auto 0; padding: 8px 16px; border-radius: 980px; color: rgba(255,255,255,.7); font-size: .85rem; text-decoration: none; transition: background .2s ease, color .2s ease; }
 .made-by:hover { background: rgba(255,255,255,.08); color: #fff; }
-.made-by img { height: 24px; width: auto; display: block; }
+.made-by img { height: 36px; width: auto; display: block; }
+.made-by { font-size: 1rem; color: rgba(255,255,255,.85); }
+@media (max-width: 640px) { .site-footer { padding-bottom: 120px; } }
 
 /* ---- Ubicación ---- */
 .ubicacion-header p { margin: 10px 0 0; }

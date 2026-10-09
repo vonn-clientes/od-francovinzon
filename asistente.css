@@ -1,10 +1,9 @@
 /* Asistente virtual del consultorio */
-.asis-btn { position: fixed; right: 20px; bottom: 90px; z-index: 60; display: flex; align-items: center; gap: 8px; padding: 12px 18px; border: 0; border-radius: 999px; background: var(--navy, #1E3A5F); color: #fff; font: 600 .95rem/1 inherit; cursor: pointer; box-shadow: 0 10px 28px rgba(30,58,95,.35); transition: transform .2s ease, box-shadow .2s ease; }
+.asis-btn { position: fixed; left: 20px; bottom: 20px; z-index: 60; display: flex; align-items: center; gap: 10px; padding: 8px 18px 8px 8px; text-align: left; border: 0; border-radius: 999px; background: var(--navy, #1E3A5F); color: #fff; font: 600 .95rem/1 inherit; cursor: pointer; box-shadow: 0 10px 28px rgba(30,58,95,.35); transition: transform .2s ease, box-shadow .2s ease; }
 .asis-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(30,58,95,.4); }
 .asis-btn:focus-visible, .asis-close:focus-visible, .asis-chip:focus-visible, .asis-send:focus-visible, .asis-input:focus-visible { outline: 3px solid var(--gold, #D4A24C); outline-offset: 2px; }
-.asis-btn svg { width: 20px; height: 20px; }
-.asis-panel.open ~ .whatsapp-float, body:has(.asis-panel.open) .whatsapp-float { display: none; }
-.asis-panel { position: fixed; right: 20px; bottom: 90px; z-index: 70; width: min(380px, calc(100vw - 24px)); height: min(560px, calc(100dvh - 120px)); display: none; flex-direction: column; background: #fff; border-radius: 20px; box-shadow: 0 24px 60px rgba(20,35,60,.35); overflow: hidden; border: 1px solid rgba(30,58,95,.12); }
+@media (max-width: 640px) { body:has(.asis-panel.open) .whatsapp-float { display: none; } .asis-panel { left: 12px; bottom: 12px; width: calc(100vw - 24px); } .asis-btn { left: 14px; } }
+.asis-panel { position: fixed; left: 20px; bottom: 20px; z-index: 70; width: min(380px, calc(100vw - 24px)); height: min(560px, calc(100dvh - 40px)); display: none; flex-direction: column; background: #fff; border-radius: 20px; box-shadow: 0 24px 60px rgba(20,35,60,.35); overflow: hidden; border: 1px solid rgba(30,58,95,.12); }
 .asis-panel.open { display: flex; }
 .asis-head { background: var(--navy, #1E3A5F); color: #fff; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
 .asis-head strong { display: block; font-size: 1rem; }
@@ -34,3 +33,11 @@
 .asis-wabtn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 9px 16px; border-radius: 999px; background: #25D366; color: #fff !important; font-weight: 700; font-size: .88rem; text-decoration: none !important; }
 .asis-wabtn:hover { background: #1fb558; }
 .asis-wabtn:focus-visible { outline: 3px solid #1E3A5F; outline-offset: 2px; }
+
+.asis-avatar { position: relative; flex: none; width: 42px; height: 42px; border-radius: 50%; background: #E8EEF6; display: grid; place-items: center; overflow: visible; }
+.asis-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.asis-avatar svg { width: 24px; height: 24px; color: var(--navy, #1E3A5F); }
+.asis-on { position: absolute; right: 0; bottom: 0; width: 11px; height: 11px; border-radius: 50%; background: #2ecc71; border: 2px solid #fff; }
+.asis-btn .asis-txt b { display: block; font-size: .95rem; }
+.asis-btn .asis-txt small { display: block; font-size: .72rem; opacity: .85; font-weight: 500; margin-top: 2px; }
+.asis-head .asis-avatar { width: 40px; height: 40px; }

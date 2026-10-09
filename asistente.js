@@ -8,21 +8,32 @@
 
   const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt) e.textContent = txt; return e; };
 
+  const NOMBRE = 'Lucía';
+  const DIENTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 3.5c-2.2 0-4 1.8-4 4.3 0 2 .8 3.4 1.3 5.2.5 1.9.4 4.5 1.4 6.5.5 1 1.6 1.2 2.1.2.6-1.2.6-3.1 1.7-3.1s1.1 1.9 1.7 3.1c.5 1 1.6.8 2.1-.2 1-2 .9-4.6 1.4-6.5.5-1.800 1.300-3.200 1.300-5.200 0-2.500-1.800-4.300-4-4.300-1.600 0-2.200.8-3 .8s-1.400-.8-3-.8z" transform="translate(1.300 0)"/></svg>';
+  function avatar() {
+    const a = el('span', 'asis-avatar'); a.setAttribute('aria-hidden', 'true');
+    const img = new Image(); img.alt = ''; img.src = '/assets/lucia.jpg';
+    img.onload = () => { a.textContent = ''; a.append(img, el('i', 'asis-on')); };
+    a.innerHTML = DIENTE; a.append(el('i', 'asis-on'));
+    return a;
+  }
   const btn = el('button', 'asis-btn');
   btn.type = 'button';
   btn.setAttribute('aria-haspopup', 'dialog');
-  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg><span>Preguntanos</span>';
+  btn.setAttribute('aria-label', 'Hablar con ' + NOMBRE + ', asistente virtual del consultorio');
+  const btxt = el('span', 'asis-txt'); btxt.append(el('b', '', NOMBRE), el('small', '', 'En línea · asistente virtual'));
+  btn.append(avatar(), btxt);
 
   const panel = el('div', 'asis-panel');
-  panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Asistente virtual del consultorio');
+  panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Chat con ' + NOMBRE + ', asistente virtual del consultorio');
   const head = el('div', 'asis-head');
-  const tit = el('div'); tit.append(el('strong', '', 'Asistente del consultorio'), el('small', '', 'Asistente virtual con IA'));
+  const tit = el('div'); const estado = el('small', '', 'En línea · asistente virtual con IA'); tit.append(el('strong', '', NOMBRE), estado);
   const cerrar = el('button', 'asis-close', '×'); cerrar.type = 'button'; cerrar.setAttribute('aria-label', 'Cerrar el asistente');
-  head.append(tit, cerrar);
+  head.append(avatar(), tit, cerrar);
   const body = el('div', 'asis-body'); body.setAttribute('aria-live', 'polite');
   const nota = el('div', 'asis-note', 'Es un asistente virtual: no reemplaza una consulta. No compartas datos personales ni de salud por acá.');
   const foot = el('form', 'asis-foot');
-  const input = el('input', 'asis-input'); input.type = 'text'; input.maxLength = 500; input.placeholder = 'Escribí tu consulta…'; input.setAttribute('aria-label', 'Tu consulta'); input.autocomplete = 'off';
+  const input = el('input', 'asis-input'); input.type = 'text'; input.maxLength = 500; input.placeholder = 'Escribile a ' + NOMBRE + '…'; input.setAttribute('aria-label', 'Tu consulta'); input.autocomplete = 'off';
   const enviar = el('button', 'asis-send', 'Enviar'); enviar.type = 'submit';
   foot.append(input, enviar);
   const wa = el('a', 'asis-wa', 'Prefiero hablar por WhatsApp'); wa.href = WA; wa.target = '_blank'; wa.rel = 'noopener';
@@ -70,7 +81,7 @@
     if (ocupado) return; texto = texto.trim(); if (!texto) return;
     ocupado = true; enviar.disabled = true;
     burbuja('user', texto); historial.push({ role: 'user', content: texto });
-    const typing = el('div', 'asis-typing'); typing.append(el('i'), el('i'), el('i')); body.append(typing); bajar();
+    estado.textContent = 'escribiendo…'; const typing = el('div', 'asis-typing'); typing.append(el('i'), el('i'), el('i')); body.append(typing); bajar();
     try {
       const r = await fetch('/api/asistente', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: historial.slice(-10) }) });
       const d = await r.json().catch(() => ({}));
@@ -81,12 +92,12 @@
     } catch (e) {
       typing.remove(); burbuja('bot', 'Ahora no pude responderte. Escribinos por WhatsApp y te contestamos a la brevedad.', 'wa');
     }
-    ocupado = false; enviar.disabled = false; input.focus();
+    estado.textContent = 'En línea · asistente virtual con IA'; ocupado = false; enviar.disabled = false; input.focus();
   }
 
   function abrir() {
     panel.classList.add('open'); btn.style.display = 'none';
-    if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy el asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); sugerencias(); }
+    if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy Lucía, la asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); sugerencias(); }
     setTimeout(() => input.focus(), 50);
     try { window.va && window.va('event', { name: 'asistente_abierto' }); } catch (e) {}
   }

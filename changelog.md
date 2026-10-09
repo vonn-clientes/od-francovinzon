@@ -2,6 +2,11 @@
 
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
 
+## 2026-10-09 — Móvil: burbuja de Lucía, títulos; asistente con cadena de proveedores
+
+- Lucía en celular es una burbuja chica abajo a la izquierda (antes se estiraba al ancho). Títulos con interlineado 1.2 y `text-wrap: balance`.
+- `api/asistente.js` usa el mismo esquema que Aguamarina (`AI_*`/`SOFI_*` con respaldo `_2`/`_3`); si el modelo de una cuenta no existe, el diagnóstico lo muestra.
+
 ## 2026-10-09 — Asistente: soporte de Groq
 
 - La clave de Faus es de Groq (no de xAI). `api/asistente.js` detecta el proveedor por el prefijo `gsk_` y usa `llama-3.3-70b-versatile`; con otra clave sigue usando xAI/Grok.

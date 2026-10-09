@@ -2,6 +2,7 @@
 (() => {
   if (window.__asistente) return; window.__asistente = true;
   const WA = 'https://wa.me/5403442457764?text=Hola!%20Quiero%20sacar%20un%20turno';
+  const URG = 'https://wa.me/543442403556?text=Hola!%20Tengo%20una%20urgencia%20dental';
   const historial = [];
   let ocupado = false;
 
@@ -25,7 +26,7 @@
   const enviar = el('button', 'asis-send', 'Enviar'); enviar.type = 'submit';
   foot.append(input, enviar);
   const wa = el('a', 'asis-wa', 'Prefiero hablar por WhatsApp'); wa.href = WA; wa.target = '_blank'; wa.rel = 'noopener';
-  panel.append(head, body, nota, foot, wa);
+  panel.append(head, body, foot);
 
   // Texto seguro: escapa todo y convierte solo links http(s) en <a>.
   function render(contenedor, texto) {
@@ -39,8 +40,23 @@
     }
     if (ult < texto.length) contenedor.append(document.createTextNode(texto.slice(ult)));
   }
+  function botonWA(urg) {
+    const a = el('a', 'asis-wabtn', urg ? 'Urgencias por WhatsApp' : 'Escribinos por WhatsApp');
+    a.href = urg ? URG : WA; a.target = '_blank'; a.rel = 'noopener';
+    return a;
+  }
   const bajar = () => { body.scrollTop = body.scrollHeight; };
-  function burbuja(rol, texto) { const m = el('div', 'asis-msg ' + (rol === 'user' ? 'asis-user' : 'asis-bot')); render(m, texto); body.append(m); bajar(); return m; }
+  function burbuja(rol, texto, boton) {
+    let urg = boton === 'urg', quiere = Boolean(boton);
+    if (rol !== 'user') {
+      if (/\[\[URGENCIAS\]\]/i.test(texto)) { urg = true; quiere = true; }
+      if (/\[\[WHATSAPP\]\]/i.test(texto)) quiere = true;
+      texto = texto.replace(/\[\[[A-Z]+\]\]/gi, '').replace(/https?:\/\/wa\.me\/\S*/gi, '').replace(/[ \t]+\n/g, '\n').trim();
+    }
+    const m = el('div', 'asis-msg ' + (rol === 'user' ? 'asis-user' : 'asis-bot')); render(m, texto);
+    if (rol !== 'user' && quiere) m.append(el('br'), botonWA(urg));
+    body.append(m); bajar(); return m;
+  }
 
   function sugerencias() {
     const box = el('div', 'asis-chips');
@@ -60,17 +76,17 @@
       const d = await r.json().catch(() => ({}));
       typing.remove();
       if (r.ok && d.reply) { historial.push({ role: 'assistant', content: d.reply }); burbuja('bot', d.reply); }
-      else if (r.status === 429) burbuja('bot', 'Estás escribiendo muy rápido. Probá de nuevo en unos minutos o escribinos por WhatsApp: ' + WA);
-      else burbuja('bot', 'No pude responderte ahora. Escribinos por WhatsApp y te contestamos a la brevedad: ' + WA);
+      else if (r.status === 429) burbuja('bot', 'Estás escribiendo muy rápido. Probá de nuevo en unos minutos o escribinos por WhatsApp.', 'wa');
+      else burbuja('bot', 'Ahora no pude responderte. Escribinos por WhatsApp y te contestamos a la brevedad.', 'wa');
     } catch (e) {
-      typing.remove(); burbuja('bot', 'No pude responderte ahora. Escribinos por WhatsApp: ' + WA);
+      typing.remove(); burbuja('bot', 'Ahora no pude responderte. Escribinos por WhatsApp y te contestamos a la brevedad.', 'wa');
     }
     ocupado = false; enviar.disabled = false; input.focus();
   }
 
   function abrir() {
     panel.classList.add('open'); btn.style.display = 'none';
-    if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy el asistente virtual del consultorio del Dr. Franco Vinzón. Te puedo ayudar con horarios, tratamientos, obras sociales y a sacar tu turno. ¿Qué necesitás?'); sugerencias(); }
+    if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy el asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); sugerencias(); }
     setTimeout(() => input.focus(), 50);
     try { window.va && window.va('event', { name: 'asistente_abierto' }); } catch (e) {}
   }

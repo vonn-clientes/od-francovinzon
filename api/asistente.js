@@ -3,30 +3,57 @@
 // La clave vive SOLO en la variable de entorno XAI_API_KEY de Vercel (nunca en el repo ni en el navegador).
 // Clave en XAI_API_KEY (o GROQ_API_KEY). Opcional: AI_MODEL. No guarda ni registra el contenido de las conversaciones.
 
-// Funciona con Groq (claves gsk_...) o con xAI/Grok. Se detecta por el prefijo de la clave.
-const CLAVE = (process.env.GROQ_API_KEY || process.env.XAI_API_KEY || '').trim();
-const ES_GROQ = CLAVE.startsWith('gsk_');
-const URL_API = ES_GROQ ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.x.ai/v1/chat/completions';
-const MODEL_FORZADO = process.env.AI_MODEL || process.env.XAI_MODEL || '';
-const PREFERIDOS = ES_GROQ
-  ? ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant']
-  : ['grok-4.7', 'grok-4', 'grok-3'];
-let modeloListo = null; // se resuelve una vez por instancia: usa un modelo que la cuenta realmente tenga
+// Proveedores de IA compatibles con el formato OpenAI (Groq, Gemini, OpenRouter, xAI...).
+// Mismo esquema que Aguamarina: AI_API_KEY, AI_BASE_URL y AI_MODEL (también _2 y _3 como respaldo).
+// Acepta además los nombres SOFI_* para poder copiar los valores tal cual desde Aguamarina.
+// Si no hay ninguno, usa XAI_API_KEY/GROQ_API_KEY y elige solo un modelo disponible en la cuenta.
+const env = (n) => (process.env[n] || '').trim();
 
-async function listarModelos() {
-  const r = await fetch(URL_API.replace('/chat/completions', '/models'), { headers: { Authorization: `Bearer ${CLAVE}` }, signal: AbortSignal.timeout(10000) });
-  if (!r.ok) throw new Error('modelos_' + r.status);
-  const d = await r.json();
-  return (d.data || []).map((m) => m.id).filter((id) => id && !/whisper|guard|tts|embed|orpheus|playai|image|imagine|transcri/i.test(id));
-}
-function elegirModelo() {
-  if (MODEL_FORZADO) return Promise.resolve(MODEL_FORZADO);
-  if (!modeloListo) {
-    modeloListo = listarModelos()
-      .then((ids) => PREFERIDOS.find((m) => ids.includes(m)) || ids[0] || PREFERIDOS[0])
-      .catch(() => { modeloListo = null; return PREFERIDOS[0]; });
+function proveedores() {
+  const out = [];
+  for (const s of ['', '_2', '_3']) {
+    const key = env('AI_API_KEY' + s) || env('SOFI_API_KEY' + s);
+    const base = env('AI_BASE_URL' + s) || env('SOFI_BASE_URL' + s);
+    const model = env('AI_MODEL' + s) || env('SOFI_MODEL' + s);
+    if (key && base && model) out.push({ base: base.replace(/\/$/, ''), key, model });
   }
-  return modeloListo;
+  if (out.length) return out;
+  const key = env('GROQ_API_KEY') || env('XAI_API_KEY');
+  if (!key) return [];
+  const groq = key.startsWith('gsk_');
+  return [{ base: groq ? 'https://api.groq.com/openai/v1' : 'https://api.x.ai/v1', key, model: '', auto: groq ? ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'] : ['grok-4.7', 'grok-4', 'grok-3'] }];
+}
+
+const cacheModelo = new Map();
+async function resolverModelo(p) {
+  if (p.model) return p.model;
+  if (cacheModelo.has(p.base)) return cacheModelo.get(p.base);
+  let m = p.auto[0];
+  try {
+    const r = await fetch(p.base + '/models', { headers: { Authorization: `Bearer ${p.key}` }, signal: AbortSignal.timeout(10000) });
+    if (r.ok) {
+      const ids = ((await r.json()).data || []).map((x) => x.id).filter((id) => id && !/whisper|guard|tts|embed|orpheus|playai|image|imagine|transcri/i.test(id));
+      m = p.auto.find((x) => ids.includes(x)) || ids[0] || m;
+      cacheModelo.set(p.base, m);
+    }
+  } catch { /* usa el primero de la lista */ }
+  return m;
+}
+
+// Pregunta a un proveedor. Devuelve { texto } o { error }.
+async function preguntar(p, mensajes, ms = 20000) {
+  const model = await resolverModelo(p);
+  try {
+    const r = await fetch(p.base + '/chat/completions', {
+      method: 'POST',
+      signal: AbortSignal.timeout(ms),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.key}` },
+      body: JSON.stringify({ model, temperature: 0.6, max_tokens: 900, ...(model.includes('gpt-oss') ? { reasoning_effort: 'low' } : {}), messages: mensajes }),
+    });
+    if (!r.ok) return { model, error: String(r.status), detalle: (await r.text()).slice(0, 220).replace(/(key|token)[^"]*/gi, '[…]') };
+    const t = String((await r.json())?.choices?.[0]?.message?.content || '').trim();
+    return t ? { model, texto: t } : { model, error: 'vacio' };
+  } catch (e) { return { model, error: e?.name || 'err' }; }
 }
 const MAX_MSGS = 12;
 const MAX_CHARS = 600;
@@ -121,23 +148,19 @@ REGLAS:
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  const clave = CLAVE;
+  const lista = proveedores();
   if (req.method === 'GET') {
-    // Diagnóstico: no muestra la clave, solo si existe y qué contesta xAI.
-    const out = { clave_cargada: Boolean(clave), proveedor: ES_GROQ ? 'groq' : 'xai' };
-    if (clave) { try { out.modelos_disponibles = await listarModelos(); } catch (e) { out.modelos_error = String(e?.message || e); } out.modelo = await elegirModelo(); } 
-    if (clave) {
-      try {
-        const r = await fetch(URL_API, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` }, body: JSON.stringify({ model: out.modelo, max_tokens: 5, messages: [{ role: 'user', content: 'hola' }] }), signal: AbortSignal.timeout(15000) });
-        out.xai_status = r.status;
-        if (!r.ok) out.xai_detalle = String(await r.text()).slice(0, 200).replace(/key[^"]*/gi, '[…]');
-      } catch (e) { out.xai_error = e?.name || 'desconocido'; }
+    // Diagnóstico: no muestra claves, solo qué proveedores hay y qué contesta cada uno.
+    const out = { proveedores_configurados: lista.length, resultados: [] };
+    for (const p of lista) {
+      const r = await preguntar(p, [{ role: 'user', content: 'hola' }], 15000);
+      out.resultados.push({ base: p.base, modelo: r.model, ok: Boolean(r.texto), error: r.error, detalle: r.detalle });
     }
     return res.status(200).json(out);
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
-  if (!clave) return res.status(503).json({ error: 'sin_configurar' });
+  if (!lista.length) return res.status(503).json({ error: 'sin_configurar' });
 
   const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'x').split(',')[0].trim();
   if (limitado(ip)) return res.status(429).json({ error: 'demasiados_mensajes' });
@@ -157,35 +180,11 @@ export default async function handler(req, res) {
     .slice(-MAX_MSGS);
   if (!mensajes.length || mensajes[mensajes.length - 1].role !== 'user') return res.status(400).json({ error: 'mensaje_invalido' });
 
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 25000);
-  try {
-    const modelo = await elegirModelo();
-    const extra = /gpt-oss/.test(modelo) ? { reasoning_effort: 'low' } : {};
-    const r = await fetch(URL_API, {
-      method: 'POST',
-      signal: ctl.signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` },
-      body: JSON.stringify({
-        model: modelo,
-        ...extra,
-        temperature: 0.6,
-        max_tokens: 1000,
-        messages: [{ role: 'system', content: sistema(origen) }, ...mensajes],
-      }),
-    });
-    if (!r.ok) {
-      console.error('asistente: el proveedor respondió', r.status);
-      return res.status(502).json({ error: 'servicio_no_disponible' });
-    }
-    const data = await r.json();
-    const texto = String(data?.choices?.[0]?.message?.content || '').trim();
-    if (!texto) return res.status(502).json({ error: 'respuesta_vacia' });
-    return res.status(200).json({ reply: texto.slice(0, 1800) });
-  } catch (e) {
-    console.error('asistente: error', e?.name || 'desconocido');
-    return res.status(502).json({ error: 'servicio_no_disponible' });
-  } finally {
-    clearTimeout(timer);
+  const conv = [{ role: 'system', content: sistema(origen) }, ...mensajes];
+  for (const p of lista) {
+    const r = await preguntar(p, conv);
+    if (r.texto) return res.status(200).json({ reply: r.texto.slice(0, 1800) });
+    console.error('asistente: falló', r.model, r.error);
   }
+  return res.status(502).json({ error: 'servicio_no_disponible' });
 }

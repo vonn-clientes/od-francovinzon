@@ -88,9 +88,13 @@ h1, h2, h3 {
   justify-content: space-between;
   padding: 10px 24px;
 }
-.logo { height: 58px; }
-.nav { display: flex; gap: 32px; font-weight: 500; font-size: .92rem; }
+.logo { height: 58px; flex: none; }
+.nav { display: flex; gap: 32px; font-weight: 500; font-size: .92rem; white-space: nowrap; }
 .nav a { transition: color .2s; }
+.nav-cta { flex: none; }
+@media (max-width: 1100px) { .nav { gap: 20px; font-size: .88rem; } }
+@media (max-width: 940px) { .nav a[href="#instagram"], .nav a[href="#resenas"] { display: none; } }
+@media (max-width: 760px) { .nav { display: none; } }
 .nav a:hover { color: var(--gold); }
 .nav-cta { padding: 9px 20px; font-size: .88rem; }
 

@@ -31,3 +31,4 @@
 - [Primera visita al odontólogo con niños: cómo prepararla](https://od-francovinzon.vercel.app/blog/primera-visita-al-odontologo-con-ninos/)
 - [Caries: cómo se detectan y cómo se tratan](https://od-francovinzon.vercel.app/blog/caries-como-se-detectan-y-se-tratan/)
 - [Encías que sangran: qué significa y qué hacer](https://od-francovinzon.vercel.app/blog/encias-que-sangran-que-significa/)
+- [Sensibilidad dental: por qué aparece y qué hacer](https://od-francovinzon.vercel.app/blog/sensibilidad-dental-causas-y-que-hacer/)

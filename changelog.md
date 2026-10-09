@@ -2,6 +2,12 @@
 
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
 
+## 2026-10-09 — Asistente: tono más humano, hora actual, botón de WhatsApp
+
+- El bot ya no ofrece "sacar turno": aclara que los turnos los coordina Ayelén por WhatsApp. Recibe fecha/hora de Argentina y si el consultorio está abierto.
+- El WhatsApp sale como botón ("Escribinos por WhatsApp" / "Urgencias por WhatsApp") mediante las marcas `[[WHATSAPP]]`/`[[URGENCIAS]]`; se sacó la nota de datos personales.
+- `GET /api/asistente` devuelve un diagnóstico (clave cargada, modelo, estado de xAI) sin mostrar la clave.
+
 ## 2026-10-09 — Asistente virtual con IA (Grok) en el sitio público
 
 - Nueva función `api/asistente.js` (POST): llama a xAI (`grok-4.7`), límite de 20 mensajes cada 10 min por IP, solo mismo origen, sin guardar conversaciones. Prompt con datos reales del consultorio; no diagnostica, no inventa precios, deriva a WhatsApp.

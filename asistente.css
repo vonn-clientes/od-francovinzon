@@ -30,3 +30,7 @@
 .asis-wa { display: block; text-align: center; padding: 8px; font-size: .82rem; background: #fff; color: #1d6b3a; font-weight: 600; text-decoration: none; border-top: 1px solid rgba(30,58,95,.08); }
 @media (max-width: 520px) { .asis-btn { right: 14px; bottom: 82px; padding: 11px 14px; } .asis-panel { right: 12px; bottom: 12px; height: min(78dvh, 600px); } }
 @media (prefers-reduced-motion: reduce) { .asis-btn, .asis-typing i { transition: none; animation: none; } }
+
+.asis-wabtn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 9px 16px; border-radius: 999px; background: #25D366; color: #fff !important; font-weight: 700; font-size: .88rem; text-decoration: none !important; }
+.asis-wabtn:hover { background: #1fb558; }
+.asis-wabtn:focus-visible { outline: 3px solid #1E3A5F; outline-offset: 2px; }

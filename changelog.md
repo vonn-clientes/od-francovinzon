@@ -2,6 +2,12 @@
 
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
 
+## 2026-10-09 — Asistente virtual con IA (Grok) en el sitio público
+
+- Nueva función `api/asistente.js` (POST): llama a xAI (`grok-4.7`), límite de 20 mensajes cada 10 min por IP, solo mismo origen, sin guardar conversaciones. Prompt con datos reales del consultorio; no diagnostica, no inventa precios, deriva a WhatsApp.
+- Widget flotante "Preguntanos" (`asistente.js` + `asistente.css`) en las páginas públicas (no en admin/gestión/subida de fotos). Aclara que es IA.
+- Requiere `XAI_API_KEY` en Vercel. **api/ queda en 12 de 12 funciones.**
+
 ## 2026-09-24 — /admin: "Exportar todos los datos" de pacientes en Excel (.xlsx) y Markdown (.md)
 
 - Reemplaza el botón viejo "Exportar todos los pacientes (CSV)" (solo nombre/apellido/DNI) por **"Exportar todos los datos (Excel)"** y **"(.md)"** en `/admin` → Datos de pacientes. El recurso viejo `export-pacientes-csv` sigue existiendo en el back.

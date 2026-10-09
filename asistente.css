@@ -1,0 +1,32 @@
+/* Asistente virtual del consultorio */
+.asis-btn { position: fixed; right: 20px; bottom: 90px; z-index: 60; display: flex; align-items: center; gap: 8px; padding: 12px 18px; border: 0; border-radius: 999px; background: var(--navy, #1E3A5F); color: #fff; font: 600 .95rem/1 inherit; cursor: pointer; box-shadow: 0 10px 28px rgba(30,58,95,.35); transition: transform .2s ease, box-shadow .2s ease; }
+.asis-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(30,58,95,.4); }
+.asis-btn:focus-visible, .asis-close:focus-visible, .asis-chip:focus-visible, .asis-send:focus-visible, .asis-input:focus-visible { outline: 3px solid var(--gold, #D4A24C); outline-offset: 2px; }
+.asis-btn svg { width: 20px; height: 20px; }
+.asis-panel.open ~ .whatsapp-float, body:has(.asis-panel.open) .whatsapp-float { display: none; }
+.asis-panel { position: fixed; right: 20px; bottom: 90px; z-index: 70; width: min(380px, calc(100vw - 24px)); height: min(560px, calc(100dvh - 120px)); display: none; flex-direction: column; background: #fff; border-radius: 20px; box-shadow: 0 24px 60px rgba(20,35,60,.35); overflow: hidden; border: 1px solid rgba(30,58,95,.12); }
+.asis-panel.open { display: flex; }
+.asis-head { background: var(--navy, #1E3A5F); color: #fff; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+.asis-head strong { display: block; font-size: 1rem; }
+.asis-head small { opacity: .75; font-size: .75rem; }
+.asis-close { margin-left: auto; background: transparent; border: 0; color: #fff; font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+.asis-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #FAF9F6; }
+.asis-msg { max-width: 86%; padding: 10px 14px; border-radius: 16px; font-size: .93rem; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+.asis-msg a { color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.asis-bot { align-self: flex-start; background: #fff; color: #22344d; border: 1px solid rgba(30,58,95,.1); border-bottom-left-radius: 4px; }
+.asis-user { align-self: flex-end; background: var(--navy, #1E3A5F); color: #fff; border-bottom-right-radius: 4px; }
+.asis-typing { align-self: flex-start; display: flex; gap: 4px; padding: 12px 14px; background: #fff; border-radius: 16px; border: 1px solid rgba(30,58,95,.1); }
+.asis-typing i { width: 7px; height: 7px; border-radius: 50%; background: #9aa9bd; animation: asisb 1s infinite ease-in-out; }
+.asis-typing i:nth-child(2) { animation-delay: .15s; } .asis-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes asisb { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+.asis-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.asis-chip { border: 1.5px solid var(--navy, #1E3A5F); background: #fff; color: var(--navy, #1E3A5F); padding: 7px 12px; border-radius: 999px; font: 600 .82rem/1 inherit; cursor: pointer; }
+.asis-chip:hover { background: var(--navy, #1E3A5F); color: #fff; }
+.asis-note { font-size: .72rem; color: #6c7b90; padding: 6px 16px 0; background: #fff; }
+.asis-foot { display: flex; gap: 8px; padding: 10px 12px 12px; background: #fff; }
+.asis-input { flex: 1; min-width: 0; border: 1.5px solid rgba(30,58,95,.2); border-radius: 12px; padding: 10px 12px; font: inherit; font-size: .95rem; }
+.asis-send { border: 0; background: var(--gold, #D4A24C); color: #1E3A5F; font-weight: 700; padding: 0 16px; border-radius: 12px; cursor: pointer; }
+.asis-send:disabled { opacity: .5; cursor: default; }
+.asis-wa { display: block; text-align: center; padding: 8px; font-size: .82rem; background: #fff; color: #1d6b3a; font-weight: 600; text-decoration: none; border-top: 1px solid rgba(30,58,95,.08); }
+@media (max-width: 520px) { .asis-btn { right: 14px; bottom: 82px; padding: 11px 14px; } .asis-panel { right: 12px; bottom: 12px; height: min(78dvh, 600px); } }
+@media (prefers-reduced-motion: reduce) { .asis-btn, .asis-typing i { transition: none; animation: none; } }

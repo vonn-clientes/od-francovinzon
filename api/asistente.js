@@ -7,7 +7,27 @@
 const CLAVE = (process.env.GROQ_API_KEY || process.env.XAI_API_KEY || '').trim();
 const ES_GROQ = CLAVE.startsWith('gsk_');
 const URL_API = ES_GROQ ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.x.ai/v1/chat/completions';
-const MODEL = process.env.AI_MODEL || process.env.XAI_MODEL || (ES_GROQ ? 'llama-3.3-70b-versatile' : 'grok-4.7');
+const MODEL_FORZADO = process.env.AI_MODEL || process.env.XAI_MODEL || '';
+const PREFERIDOS = ES_GROQ
+  ? ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant']
+  : ['grok-4.7', 'grok-4', 'grok-3'];
+let modeloListo = null; // se resuelve una vez por instancia: usa un modelo que la cuenta realmente tenga
+
+async function listarModelos() {
+  const r = await fetch(URL_API.replace('/chat/completions', '/models'), { headers: { Authorization: `Bearer ${CLAVE}` }, signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error('modelos_' + r.status);
+  const d = await r.json();
+  return (d.data || []).map((m) => m.id).filter((id) => id && !/whisper|guard|tts|embed|orpheus|playai|image|imagine|transcri/i.test(id));
+}
+function elegirModelo() {
+  if (MODEL_FORZADO) return Promise.resolve(MODEL_FORZADO);
+  if (!modeloListo) {
+    modeloListo = listarModelos()
+      .then((ids) => PREFERIDOS.find((m) => ids.includes(m)) || ids[0] || PREFERIDOS[0])
+      .catch(() => { modeloListo = null; return PREFERIDOS[0]; });
+  }
+  return modeloListo;
+}
 const MAX_MSGS = 12;
 const MAX_CHARS = 600;
 const LIMITE = 20;            // mensajes por IP...
@@ -104,10 +124,11 @@ export default async function handler(req, res) {
   const clave = CLAVE;
   if (req.method === 'GET') {
     // Diagnóstico: no muestra la clave, solo si existe y qué contesta xAI.
-    const out = { clave_cargada: Boolean(clave), proveedor: ES_GROQ ? 'groq' : 'xai', modelo: MODEL };
+    const out = { clave_cargada: Boolean(clave), proveedor: ES_GROQ ? 'groq' : 'xai' };
+    if (clave) { try { out.modelos_disponibles = await listarModelos(); } catch (e) { out.modelos_error = String(e?.message || e); } out.modelo = await elegirModelo(); } 
     if (clave) {
       try {
-        const r = await fetch(URL_API, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` }, body: JSON.stringify({ model: MODEL, max_tokens: 5, messages: [{ role: 'user', content: 'hola' }] }), signal: AbortSignal.timeout(15000) });
+        const r = await fetch(URL_API, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` }, body: JSON.stringify({ model: out.modelo, max_tokens: 5, messages: [{ role: 'user', content: 'hola' }] }), signal: AbortSignal.timeout(15000) });
         out.xai_status = r.status;
         if (!r.ok) out.xai_detalle = String(await r.text()).slice(0, 200).replace(/key[^"]*/gi, '[…]');
       } catch (e) { out.xai_error = e?.name || 'desconocido'; }
@@ -139,14 +160,17 @@ export default async function handler(req, res) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 25000);
   try {
+    const modelo = await elegirModelo();
+    const extra = /gpt-oss/.test(modelo) ? { reasoning_effort: 'low' } : {};
     const r = await fetch(URL_API, {
       method: 'POST',
       signal: ctl.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` },
       body: JSON.stringify({
-        model: MODEL,
+        model: modelo,
+        ...extra,
         temperature: 0.6,
-        max_tokens: 500,
+        max_tokens: 1000,
         messages: [{ role: 'system', content: sistema(origen) }, ...mensajes],
       }),
     });

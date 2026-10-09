@@ -1,9 +1,13 @@
 // Asistente virtual del consultorio (chat con Grok de xAI).
 // Una sola función: recibe el historial corto de la conversación y devuelve { reply }.
 // La clave vive SOLO en la variable de entorno XAI_API_KEY de Vercel (nunca en el repo ni en el navegador).
-// Opcional: XAI_MODEL (por defecto grok-4.7). No guarda ni registra el contenido de las conversaciones.
+// Clave en XAI_API_KEY (o GROQ_API_KEY). Opcional: AI_MODEL. No guarda ni registra el contenido de las conversaciones.
 
-const MODEL = process.env.XAI_MODEL || 'grok-4.7';
+// Funciona con Groq (claves gsk_...) o con xAI/Grok. Se detecta por el prefijo de la clave.
+const CLAVE = (process.env.GROQ_API_KEY || process.env.XAI_API_KEY || '').trim();
+const ES_GROQ = CLAVE.startsWith('gsk_');
+const URL_API = ES_GROQ ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.x.ai/v1/chat/completions';
+const MODEL = process.env.AI_MODEL || process.env.XAI_MODEL || (ES_GROQ ? 'llama-3.3-70b-versatile' : 'grok-4.7');
 const MAX_MSGS = 12;
 const MAX_CHARS = 600;
 const LIMITE = 20;            // mensajes por IP...
@@ -97,13 +101,13 @@ REGLAS:
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  const clave = process.env.XAI_API_KEY;
+  const clave = CLAVE;
   if (req.method === 'GET') {
     // Diagnóstico: no muestra la clave, solo si existe y qué contesta xAI.
-    const out = { clave_cargada: Boolean(clave), modelo: MODEL };
+    const out = { clave_cargada: Boolean(clave), proveedor: ES_GROQ ? 'groq' : 'xai', modelo: MODEL };
     if (clave) {
       try {
-        const r = await fetch('https://api.x.ai/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` }, body: JSON.stringify({ model: MODEL, max_tokens: 5, messages: [{ role: 'user', content: 'hola' }] }), signal: AbortSignal.timeout(15000) });
+        const r = await fetch(URL_API, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` }, body: JSON.stringify({ model: MODEL, max_tokens: 5, messages: [{ role: 'user', content: 'hola' }] }), signal: AbortSignal.timeout(15000) });
         out.xai_status = r.status;
         if (!r.ok) out.xai_detalle = String(await r.text()).slice(0, 200).replace(/key[^"]*/gi, '[…]');
       } catch (e) { out.xai_error = e?.name || 'desconocido'; }
@@ -135,7 +139,7 @@ export default async function handler(req, res) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 25000);
   try {
-    const r = await fetch('https://api.x.ai/v1/chat/completions', {
+    const r = await fetch(URL_API, {
       method: 'POST',
       signal: ctl.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${clave}` },
@@ -147,7 +151,7 @@ export default async function handler(req, res) {
       }),
     });
     if (!r.ok) {
-      console.error('asistente: xAI respondió', r.status);
+      console.error('asistente: el proveedor respondió', r.status);
       return res.status(502).json({ error: 'servicio_no_disponible' });
     }
     const data = await r.json();

@@ -2,6 +2,10 @@
 
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
 
+## 2026-10-09 — Asistente: soporte de Groq
+
+- La clave de Faus es de Groq (no de xAI). `api/asistente.js` detecta el proveedor por el prefijo `gsk_` y usa `llama-3.3-70b-versatile`; con otra clave sigue usando xAI/Grok.
+
 ## 2026-10-09 — Asistente: tono más humano, hora actual, botón de WhatsApp
 
 - El bot ya no ofrece "sacar turno": aclara que los turnos los coordina Ayelén por WhatsApp. Recibe fecha/hora de Argentina y si el consultorio está abierto.

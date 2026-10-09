@@ -632,3 +632,4 @@ sin píldora; si no, redondeo de turnosAsistidos/turnosPasados.
 (?maxFichas=40&offset=) sobre las **204 fichas** (204/204, una tanda topó con cuota de
 lectura de Google y se reintentó). Verificado en planilla (muestreo): Pamela Barral 2/2,
 Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo actualizado.
+

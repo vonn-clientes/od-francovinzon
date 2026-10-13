@@ -26,5 +26,18 @@
     "api/asistente.js": {
       "maxDuration": 30
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/((?!api/|gestion|admin|pacientes|turno|turnos|mobilephotouploader|t/|assets/).*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "od-francovinzon.vercel.app"
+        }
+      ],
+      "destination": "https://odfrancovinzon.vonn.com.ar/$1",
+      "permanent": true
+    }
+  ]
 }

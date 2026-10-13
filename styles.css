@@ -433,3 +433,10 @@ h1, h2, h3 {
 .reviews-dots button.on { background: var(--gold); }
 .reviews-dots button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 .resenas-link { display: inline-block; margin-top: 26px; color: rgba(255,255,255,.85); text-decoration: underline; text-underline-offset: 3px; }
+
+/* Texto local para buscadores y personas */
+.seo-local { padding: 56px 24px; background: var(--white); }
+.seo-local .narrow { max-width: 760px; margin: 0 auto; }
+.seo-local h2 { font-size: 1.6rem; margin-bottom: 14px; }
+.seo-local p { color: var(--navy-light); margin-bottom: 12px; }
+.seo-local a { color: var(--navy); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }

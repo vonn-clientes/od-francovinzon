@@ -8,4 +8,4 @@ Disallow: /turno/
 Disallow: /t/
 Disallow: /mobilephotouploaderodfrancovinzon/
 
-Sitemap: https://od-francovinzon.vercel.app/sitemap.xml
+Sitemap: https://odfrancovinzon.vonn.com.ar/sitemap.xml

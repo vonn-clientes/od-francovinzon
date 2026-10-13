@@ -2,6 +2,12 @@
 
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
 
+## 2026-10-13 — SEO: dominio nuevo, página "Dentista", 2 notas de blog, logo de VONN
+
+- Dominio público: `odfrancovinzon.vonn.com.ar` (canonicals, sitemap, robots, llms.txt y JSON-LD). `vercel.json` redirige (308) las páginas públicas desde `od-francovinzon.vercel.app`; **no** redirige `/api`, `/gestion`, `/admin`, `/pacientes`, `/turno(s)`, `/t/`, fotos de recetas ni `/assets` (siguen en el dominio viejo, p. ej. el callback de Google OAuth de `api/gestion/pacientes.js`).
+- Página nueva `/dentista-concepcion-del-uruguay/` y notas "Odontólogo, dentista, ortodoncista: ¿qué diferencia hay?" y "Cómo elegir un buen odontólogo". Home: título "Odontólogo y Dentista en Concepción del Uruguay", texto local y enlaces internos; JSON-LD con `alternateName` y `areaServed` (ciudad + Entre Ríos).
+- Logo de VONN del pie corregido: el cuadrado del ícono era blanco y escondía las rayitas (ahora `#0A0A0A`).
+
 ## 2026-10-09 — Móvil: burbuja de Lucía, títulos; asistente con cadena de proveedores
 
 - Lucía en celular es una burbuja chica abajo a la izquierda (antes se estiraba al ancho). Títulos con interlineado 1.2 y `text-wrap: balance`.

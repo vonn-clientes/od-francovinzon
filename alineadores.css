@@ -1,0 +1,47 @@
+/* Página "Alineadores transparentes" + tarjeta destacada del home. Usa variables de styles.css. */
+.al-hero { background: linear-gradient(180deg, #F3F7FC 0%, var(--bg) 100%); padding: 56px 0 48px; }
+.al-hero-in { display: grid; gap: 36px; align-items: center; grid-template-columns: 1fr; }
+@media (min-width: 860px) { .al-hero-in { grid-template-columns: 1.15fr .85fr; gap: 56px; } }
+.al-badge { display: inline-block; background: var(--navy); color: #fff; font-weight: 600; font-size: .82rem; letter-spacing: .04em; padding: 6px 14px; border-radius: 999px; margin-bottom: 16px; }
+.al-badge::first-letter { color: var(--gold); }
+.al-hero h1 { font-size: clamp(1.9rem, 5vw, 3rem); line-height: 1.12; margin-bottom: 14px; text-wrap: balance; }
+.al-hero .lead { color: var(--navy-light); font-size: 1.1rem; max-width: 540px; margin-bottom: 24px; }
+.al-cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.al-cta-c { justify-content: center; }
+.al-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; padding: 0; }
+.al-chips li { background: #fff; border: 1px solid rgba(30,58,95,.12); color: var(--navy); border-radius: 999px; padding: 6px 14px; font-size: .88rem; font-weight: 600; }
+.al-hero-art svg { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 auto; filter: drop-shadow(0 24px 36px rgba(30,58,95,.14)); }
+.al-sec { padding: 72px 0; }
+.al-alt { background: var(--bg); }
+.al-sec h2, .al-fin h2 { font-size: clamp(1.5rem, 3.5vw, 2rem); margin-bottom: 10px; text-align: center; }
+.al-sub { text-align: center; color: var(--navy-light); margin-bottom: 36px; }
+.al-grid { display: grid; gap: 18px; margin-top: 32px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.al-card { background: #fff; border: 1px solid rgba(30,58,95,.08); border-radius: 18px; padding: 26px; transition: transform .25s ease, box-shadow .25s ease; }
+.al-card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(30,58,95,.10); }
+.al-num { color: var(--gold); font-family: var(--serif); font-size: 1.3rem; font-weight: 600; }
+.al-card h3 { font-size: 1.2rem; margin: 6px 0; }
+.al-card p { color: var(--navy-light); font-size: .96rem; }
+.al-steps { list-style: none; padding: 0; max-width: 760px; margin: 0 auto; display: grid; gap: 16px; }
+.al-steps li { display: flex; gap: 18px; background: #fff; border: 1px solid rgba(30,58,95,.08); border-radius: 18px; padding: 22px; }
+.al-step-n { flex: 0 0 44px; height: 44px; border-radius: 50%; background: var(--navy); color: #fff; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-weight: 600; font-size: 1.15rem; }
+.al-steps h3 { font-size: 1.15rem; margin-bottom: 4px; }
+.al-steps p { color: #3b4a5c; font-size: .98rem; }
+.al-two { display: grid; gap: 40px; grid-template-columns: 1fr; }
+@media (min-width: 860px) { .al-two { grid-template-columns: 1fr 1fr; gap: 56px; } }
+.al-two h2 { text-align: left; margin-bottom: 18px; }
+.al-check, .al-care { list-style: none; padding: 0; display: grid; gap: 12px; counter-reset: c; }
+.al-check li, .al-care li { background: #fff; border: 1px solid rgba(30,58,95,.08); border-radius: 14px; padding: 14px 16px 14px 48px; position: relative; color: #3b4a5c; }
+.al-check li::before { content: "✓"; position: absolute; left: 16px; top: 13px; color: #fff; background: var(--gold); width: 22px; height: 22px; border-radius: 50%; font-size: .8rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.al-care li { counter-increment: c; }
+.al-care li::before { content: counter(c); position: absolute; left: 14px; top: 12px; color: #fff; background: var(--navy); width: 24px; height: 24px; border-radius: 50%; font-size: .82rem; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+.al-fin { background: linear-gradient(135deg, #EAF1FA, #F7F1E3); padding: 64px 24px; text-align: center; }
+.al-fin p { max-width: 640px; margin: 0 auto 24px; color: #3b4a5c; }
+/* Tarjeta destacada en el home */
+.card-star { text-align: left; display: grid; gap: 14px; position: relative; margin: 0 0 22px; padding: 30px 28px; border-radius: 22px; color: #fff; text-decoration: none; background: linear-gradient(135deg, var(--navy) 0%, #2C5282 100%); box-shadow: 0 18px 40px rgba(30,58,95,.22); transition: transform .25s ease, box-shadow .25s ease; }
+.card-star:hover { transform: translateY(-3px); box-shadow: 0 24px 48px rgba(30,58,95,.28); }
+.card-star:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+.card-star .star-badge { justify-self: start; background: var(--gold); color: var(--navy); font-weight: 700; font-size: .78rem; letter-spacing: .05em; padding: 5px 12px; border-radius: 999px; }
+.card-star h3 { color: #fff; font-size: clamp(1.4rem, 3.5vw, 1.9rem); font-weight: 500; }
+.card-star p { color: rgba(255,255,255,.85); max-width: 640px; }
+.card-star .star-go { justify-self: start; font-weight: 600; color: var(--gold); }
+@media (prefers-reduced-motion: reduce) { .al-card, .card-star { transition: none; } .al-card:hover, .card-star:hover { transform: none; } }

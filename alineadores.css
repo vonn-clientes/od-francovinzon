@@ -10,6 +10,7 @@
 .al-cta-c { justify-content: center; }
 .al-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; padding: 0; }
 .al-chips li { background: #fff; border: 1px solid rgba(30,58,95,.12); color: var(--navy); border-radius: 999px; padding: 6px 14px; font-size: .88rem; font-weight: 600; }
+.al-hero-art img { width: 100%; max-width: 440px; height: auto; display: block; margin: 0 auto; border-radius: 28px; box-shadow: 0 24px 48px rgba(30,58,95,.18); }
 .al-hero-art svg { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 auto; filter: drop-shadow(0 24px 36px rgba(30,58,95,.14)); }
 .al-sec { padding: 72px 0; }
 .al-alt { background: var(--bg); }

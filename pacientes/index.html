@@ -1867,6 +1867,7 @@
     // Modo "Entrega de dinero": mismo formulario, pero solo fecha + monto + forma de pago
     // (sin tratamiento ni Debe). Se guarda como un pago normal (Haber), igual que siempre.
     const modoEntrega = !!entrega && !fila;
+    modoEntregaActivo = modoEntrega;
     movTratamiento.closest('.field-row').style.display = modoEntrega ? 'none' : '';
     movDebe.closest('.field').style.display = modoEntrega ? 'none' : '';
     movHaber.previousElementSibling.textContent = modoEntrega ? 'Monto entregado' : 'Haber (pago)';
@@ -1910,12 +1911,20 @@
   }
   let movAutosaveHintTimer = null;
 
+  // true mientras está abierto el form en modo "Entrega de dinero" (ver abrirFormMov).
+  let modoEntregaActivo = false;
+  const DESCRIPCION_ENTREGA = 'Entrega de dinero';
   function datosMovActuales() {
+    const haber = movHaber.value ? Number(movHaber.value) : 0;
+    let tratamiento = movTratamiento.value.trim();
+    // En modo entrega no hay campo de tratamiento: la descripción se agrega recién al
+    // guardar, cuando ya hay un monto (así abrir y cerrar el form sin monto no deja filas).
+    if (modoEntregaActivo && !tratamiento && haber > 0) tratamiento = DESCRIPCION_ENTREGA;
     return {
       fecha: movFecha.value,
-      tratamiento: movTratamiento.value.trim(),
+      tratamiento,
       debe: movDebe.value ? Number(movDebe.value) : 0,
-      haber: movHaber.value ? Number(movHaber.value) : 0,
+      haber,
       formaPago: movFormaPago.value.trim(),
     };
   }

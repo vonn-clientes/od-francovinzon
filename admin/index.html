@@ -180,7 +180,7 @@
       <div class="section" id="sec-dashboard">
         <div class="card">
           <h2>Dashboard de métricas</h2>
-          <p class="hint">Últimos <span id="dash-rango">30</span> días + próximos 60 (incluye turnos ya reservados a futuro). <button class="btn btn-outline" id="dash-refrescar" style="padding:5px 12px;font-size:11.5px;">Actualizar</button></p>
+          <p class="hint">Últimos <span id="dash-rango">30</span> días + próximos 60 (incluye turnos ya reservados a futuro). <span class="hint" id="dash-generado"></span> <button class="btn btn-outline" id="dash-refrescar" style="padding:5px 12px;font-size:11.5px;">Actualizar</button></p>
           <div class="stat-grid" id="dash-stats"></div>
           <h3 style="font-size:14px;margin-bottom:6px;">Turnos por día</h3>
           <div class="bars" id="dash-bars"></div>
@@ -240,6 +240,18 @@
           <div class="table-wrap hidden" id="dash-pacientes-wrap" style="margin-top:12px;">
             <table id="dash-pacientes-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Origen</th><th></th></tr></thead><tbody></tbody></table>
           </div>
+        </div>
+
+        <div class="card" id="card-publico">
+          <h2>Público objetivo (buyer persona)</h2>
+          <p class="hint">Se calcula con todas las fichas, los turnos de los últimos 12 meses y el historial de visitas. Es anónimo: solo totales y porcentajes, sin nombres ni datos de contacto. <span id="pub-generado"></span> <button class="btn btn-outline" id="pub-refrescar" style="padding:5px 12px;font-size:11.5px;">Actualizar</button></p>
+          <div id="pub-persona"></div>
+          <h3 style="font-size:14px;margin:16px 0 8px;">Segmentos principales</h3>
+          <div id="pub-segmentos" class="stat-grid"></div>
+          <div class="stat-grid" id="pub-resumen"></div>
+          <div id="pub-secciones"></div>
+          <div class="msg" id="pub-msg"></div>
+          <p class="hint" style="margin-top:12px;"><strong>Qué falta para un buyer persona completo:</strong> el sistema todavía no guarda <em>cómo conoció al consultorio</em> cada paciente (Google, Instagram, recomendación…), ni sus intereses u objeciones. Es el dato más valioso para saber en qué canal invertir; se puede agregar como una pregunta más al reservar o en la ficha.</p>
         </div>
       </div>
 
@@ -378,6 +390,13 @@
             <button class="btn btn-outline" id="p-export-perfil">Exportar perfil anónimo (CSV)</button>
           </div>
           <div class="msg" id="p-perfil-msg"></div>
+          <h3 style="font-size:14px;margin:16px 0 8px;">Audiencias para Meta Ads y Google Ads</h3>
+          <p class="hint">Lista de contactos (email, teléfono, nombre y apellido) lista para subir como audiencia personalizada de Meta o como Customer Match de Google Ads. No incluye tratamientos, saldos ni datos de salud. Meta y Google piden al menos unos cientos de contactos para que la audiencia sirva. Se descarga como CSV (se abre en Excel).</p>
+          <div class="row-actions">
+            <button class="btn btn-outline" id="p-export-meta">Descargar para Meta Ads (CSV)</button>
+            <button class="btn btn-outline" id="p-export-google">Descargar para Google Ads (CSV)</button>
+          </div>
+          <div class="msg" id="p-audiencia-msg"></div>
         </div>
       </div>
 
@@ -542,7 +561,7 @@
     if (SECCIONES_CARGADAS.has(sec)) return;
     SECCIONES_CARGADAS.add(sec);
     const loaders = {
-      dashboard: () => { cargarDashboard(); cargarDashboardAvanzado(); },
+      dashboard: () => { cargarDashboard(); cargarDashboardAvanzado(); cargarPublico(); },
       'reserva-online': cargarReservaOnline,
       horarios: cargarHorarios, textos: cargarTextos,
       listas: cargarListas, radios: cargarRadios, pacientes: () => {},
@@ -558,6 +577,14 @@
   }
 
   // ---------- Dashboard ----------
+  // "Datos de hoy 02:00" / "Actualizado hace un momento": las métricas se precalculan todos
+  // los días a las 2:00 AM; el botón Actualizar recalcula en vivo.
+  function mostrarGenerado(m) {
+    const el = document.getElementById('dash-generado');
+    if (!el || !m || !m.generadoEn) return;
+    const cuando = new Date(m.generadoEn).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    el.textContent = m.desdeCache ? `Datos del ${cuando} (se actualizan solos a las 2:00).` : `Actualizado en vivo: ${cuando}.`;
+  }
   async function cargarDashboard(forzar) {
     // El cálculo de deuda recorre todas las fichas de /pacientes una por una — con
     // varias decenas de pacientes puede tardar unos segundos reales, no es un
@@ -570,6 +597,7 @@
     setMsg('dash-msg', '', '');
     try {
       const m = await apiGet('metricas', forzar ? { dias: 30, forzar: 1 } : { dias: 30 });
+      mostrarGenerado(m);
       document.getElementById('dash-rango').textContent = m.rangoDias;
       document.getElementById('dash-stats').innerHTML = [
         ['Turnos totales', m.totalTurnos],
@@ -632,6 +660,120 @@
   }
 
   let pacientesTotalesCache = null;
+  // ---------- Público objetivo (buyer persona) ----------
+  // Los datos vienen de "filas" = [sección, categoría, detalle, cantidad, % dentro de la sección]
+  // (mismo perfil anónimo del export). Todo se arma acá en el navegador.
+  async function cargarPublico(forzar) {
+    document.getElementById('pub-persona').innerHTML = '<p class="hint">Cargando público objetivo…</p>';
+    document.getElementById('pub-segmentos').innerHTML = '';
+    document.getElementById('pub-resumen').innerHTML = '';
+    document.getElementById('pub-secciones').innerHTML = '';
+    setMsg('pub-msg', '', '');
+    try {
+      const m = await apiGet('publico-objetivo', forzar ? { forzar: 1 } : {});
+      if (m.success === false) throw new Error(m.error || 'sin datos');
+      const el = document.getElementById('pub-generado');
+      if (m.generadoEn) {
+        const cuando = new Date(m.generadoEn).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        el.textContent = m.desdeCache ? `Datos del ${cuando} (se actualizan solos a las 2:00).` : `Actualizado en vivo: ${cuando}.`;
+      }
+      renderPublico(m.filas || []);
+    } catch (e) {
+      if (e.message !== 'unauthorized') {
+        document.getElementById('pub-persona').innerHTML = '';
+        setMsg('pub-msg', `No se pudo cargar el público objetivo: ${e.message}`, 'error');
+      }
+    }
+  }
+  document.getElementById('pub-refrescar').addEventListener('click', () => {
+    setMsg('pub-msg', 'Recalculando en vivo: recorre todas las fichas, puede tardar 1–3 minutos.', '');
+    cargarPublico(true);
+  });
+
+  function renderPublico(filas) {
+    const sec = (nombre) => filas.filter((f) => f[0] === nombre && f[1] !== '(nota)');
+    const esc = escapeHtmlAdmin;
+    const tope = (nombre, excluir = ['Sin dato', 'Otras localidades', 'Otras obras sociales']) =>
+      sec(nombre).filter((f) => !excluir.includes(f[1])).sort((x, y) => y[3] - x[3])[0];
+    const resumen = (etiq) => (sec('Resumen').find((f) => f[1] === etiq) || [])[3];
+
+    // Resumen numérico
+    const edadProm = resumen('Edad promedio (años)');
+    const edadMed = resumen('Edad mediana (años)');
+    document.getElementById('pub-resumen').innerHTML = [
+      ['Fichas analizadas', resumen('Fichas de pacientes analizadas') ?? '—'],
+      ['Pacientes en total (con solo turno)', resumen('Pacientes en planilla consolidada') ?? '—'],
+      ['Edad promedio', edadProm != null ? `${String(edadProm).replace('.', ',')} años` : 'N/D'],
+      ['Edad mediana', edadMed != null ? `${String(edadMed).replace('.', ',')} años` : 'N/D'],
+    ].map(([l, n]) => `<div class="stat-tile"><div class="num">${esc(String(n))}</div><div class="label">${esc(l)}</div></div>`).join('');
+
+    // Persona principal (frase armada con los datos dominantes)
+    const franja = tope('Edad (franja)');
+    const fin = tope('Financiación');
+    const loc = tope('Localidad');
+    const trat = tope('Tratamientos — pacientes que lo hicieron al menos una vez');
+    const dia = tope('Turnos por día de la semana');
+    const horario = tope('Turnos por franja horaria');
+    const canal = tope('Turnos: canal de reserva');
+    const pct = (f) => (f ? `${String(f[4]).replace('.', ',')}%` : '');
+    const partes = [];
+    if (franja) partes.push(`tiene entre <strong>${esc(franja[1])}</strong> años (${pct(franja)} de las fichas)`);
+    if (loc) partes.push(`vive en <strong>${esc(loc[1])}</strong> (${pct(loc)})`);
+    if (fin) partes.push(`se atiende como <strong>${esc(fin[1].toLowerCase())}</strong> (${pct(fin)})`);
+    if (trat) partes.push(`el tratamiento más frecuente es <strong>${esc(trat[1].toLowerCase())}</strong>`);
+    const hab = [];
+    if (dia) hab.push(`los <strong>${esc(dia[1].toLowerCase())}</strong>`);
+    if (horario) hab.push(`en horario de <strong>${esc(horario[1].toLowerCase())}</strong>`);
+    document.getElementById('pub-persona').innerHTML = partes.length ? `
+      <div style="background:var(--cream);border-left:4px solid var(--gold);border-radius:10px;padding:14px 16px;">
+        <div style="font-family:'Fraunces',Georgia,serif;font-size:17px;color:var(--navy);margin-bottom:6px;">Paciente más frecuente</div>
+        <div style="font-size:14px;line-height:1.5;">Quien más se atiende ${partes.join(', ')}.${hab.length ? ` Suele sacar turno ${hab.join(' ')}` : ''}${canal ? `${hab.length ? ', ' : ' Suele sacar turno '}${esc(canal[1].toLowerCase().includes('online') ? 'reservando online' : 'por teléfono, WhatsApp o en persona')} (${pct(canal)})` : ''}${hab.length || canal ? '.' : ''}</div>
+      </div>` : '<p class="hint">Todavía no hay datos suficientes para armar el perfil.</p>';
+
+    // Segmentos: cada franja etaria con su financiación y tratamientos dominantes
+    const franjas = sec('Edad (franja)').filter((f) => f[1] !== 'Sin dato').sort((x, y) => y[3] - x[3]).slice(0, 4);
+    const cruceFin = sec('Cruce: franja etaria × financiación');
+    const cruceTrat = sec('Cruce: franja etaria × tratamiento (pacientes)');
+    document.getElementById('pub-segmentos').innerHTML = franjas.map((f, i) => {
+      const finTop = cruceFin.filter((c) => c[1] === f[1] && c[2] !== 'Sin dato').sort((x, y) => y[3] - x[3])[0];
+      const tratTop = cruceTrat.filter((c) => c[1] === f[1]).sort((x, y) => y[3] - x[3]).slice(0, 2);
+      return `<div class="stat-tile">
+        <div class="label">Segmento ${i + 1}</div>
+        <div class="num" style="font-size:20px;">${esc(f[1])}</div>
+        <div class="label"><strong>${String(f[4]).replace('.', ',')}%</strong> de los pacientes (${f[3]})</div>
+        ${finTop ? `<div class="label">Mayormente: ${esc(finTop[2].toLowerCase())} (${String(finTop[4]).replace('.', ',')}%)</div>` : ''}
+        ${tratTop.length ? `<div class="label">Suelen hacer: ${tratTop.map((t) => esc(t[2].toLowerCase())).join(', ')}</div>` : ''}
+      </div>`;
+    }).join('') || '<p class="hint">Sin fechas de nacimiento cargadas para armar segmentos.</p>';
+
+    // Barras horizontales por sección
+    const SECCIONES = [
+      ['Edad (franja)', 'Edad'],
+      ['Financiación', 'Particular vs. obra social'],
+      ['Obra social / prepaga (nombre)', 'Obras sociales y prepagas'],
+      ['Localidad', 'Dónde viven'],
+      ['Tratamientos — pacientes que lo hicieron al menos una vez', 'Tratamientos (pacientes)'],
+      ['Turnos por día de la semana', 'Día de la semana'],
+      ['Turnos por franja horaria', 'Horario de los turnos'],
+      ['Turnos: canal de reserva', 'Cómo sacan el turno'],
+      ['Turnos: paciente nuevo vs. que ya venía', 'Nuevos vs. recurrentes'],
+      ['Visitas por paciente', 'Fidelidad (visitas por paciente)'],
+      ['Forma de pago (cobros)', 'Forma de pago'],
+      ['Año de la primera visita registrada', 'Año de la primera visita (captación)'],
+    ];
+    document.getElementById('pub-secciones').innerHTML = SECCIONES.map(([clave, titulo]) => {
+      const lista = sec(clave);
+      if (!lista.length) return '';
+      const max = Math.max(1, ...lista.map((f) => f[4] || 0));
+      return `<h3 style="font-size:14px;margin:18px 0 8px;">${esc(titulo)}</h3>` + lista.slice(0, 10).map((f) => `
+        <div style="display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12.5px;">
+          <div style="width:34%;min-width:110px;">${esc(f[1])}</div>
+          <div style="flex:1;background:var(--cream);border-radius:6px;height:14px;"><div style="width:${Math.max(2, Math.round(((f[4] || 0) / max) * 100))}%;height:14px;border-radius:6px;background:var(--navy-soft);"></div></div>
+          <div style="width:92px;text-align:right;color:var(--muted);">${String(f[4]).replace('.', ',')}% · ${f[3]}</div>
+        </div>`).join('');
+    }).join('');
+  }
+
   async function cargarDashboardAvanzado(forzar) {
     document.getElementById('dash-ocupacion').innerHTML = '<p class="hint">Cargando…</p>';
     document.getElementById('dash-inasistencia-bars').innerHTML = '';
@@ -641,6 +783,7 @@
     setMsg('dash2-msg', '', '');
     try {
       const m = await apiGet('metricas-avanzadas', forzar ? { forzar: 1 } : {});
+      mostrarGenerado(m);
 
       // (a) Ocupación
       const nombreMes = (o) => o ? new Date(o.anio, o.mes - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : '';
@@ -1043,6 +1186,12 @@
   });
   document.getElementById('p-export-completo-md').addEventListener('click', (e) => {
     descargarExport(`/api/gestion/admin?recurso=export-pacientes-completo&formato=md&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-completo-msg', 'pacientes.md');
+  });
+  document.getElementById('p-export-meta').addEventListener('click', (e) => {
+    descargarExport(`/api/gestion/admin?recurso=export-audiencia&plataforma=meta&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-audiencia-msg', 'audiencia_meta_ads.csv');
+  });
+  document.getElementById('p-export-google').addEventListener('click', (e) => {
+    descargarExport(`/api/gestion/admin?recurso=export-audiencia&plataforma=google&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-audiencia-msg', 'audiencia_google_ads.csv');
   });
   document.getElementById('p-export-turnos-csv').addEventListener('click', () => {
     const desde = document.getElementById('p-turnos-desde').value;

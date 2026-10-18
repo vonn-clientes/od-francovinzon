@@ -3,6 +3,7 @@
 // Hobby (ver CLAUDE.md). Lecturas por GET con `recurso` (+ `modo` cuando hace falta),
 // escrituras por POST con `recurso` + `accion`. Clave propia: ADMIN_KEY
 // (lib/adminAuth.js), nunca GESTION_KEY — Ayelen no tiene acceso acá.
+import zlib from 'node:zlib';
 import { isValidAdminKey } from '../../lib/adminAuth.js';
 import { isValidGestionKey } from '../../lib/googleCalendar.js';
 import {
@@ -21,6 +22,7 @@ import {
   leerActividadReciente, leerAlertasRecientes,
 } from '../../lib/adminConfig.js';
 import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
+import { normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
 import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
 
@@ -45,6 +47,15 @@ export default async function handler(req, res) {
     const key = req.method === 'GET' ? req.query.key : req.body.key;
     const recurso = req.method === 'GET' ? req.query.recurso : req.body.recurso;
 
+    // Actualización diaria de métricas (cron de Vercel, 2:00 AM Argentina, ver vercel.json):
+    // se autentica con CRON_SECRET (header Authorization) o, a mano, con ADMIN_KEY.
+    if (req.method === 'GET' && recurso === 'metricas-cron') {
+      const secreto = process.env.CRON_SECRET;
+      const viaCron = !!secreto && (req.headers.authorization || '') === `Bearer ${secreto}`;
+      if (!viaCron && !isValidAdminKey(key)) return res.status(401).json({ success: false, error: 'unauthorized' });
+      return await conError((rq, rs) => metricasCron(rq, rs, viaCron), req, res);
+    }
+
     // login-log: registro de actividad ("quién entró a /gestion" del pedido, sección 7)
     // — cualquiera de las dos claves puede escribir ahí, no expone ni cambia nada.
     const esLoginLog = req.method === 'POST' && recurso === 'login-log';
@@ -66,8 +77,9 @@ export default async function handler(req, res) {
       if (recurso === 'radios') return await getRadios(req, res);
       if (recurso === 'actividad') return await getActividad(req, res);
       if (recurso === 'monitoreo') return await getMonitoreo(req, res);
-      if (recurso === 'metricas') return await getMetricas(req, res);
-      if (recurso === 'metricas-avanzadas') return await getMetricasAvanzadas(req, res);
+      if (recurso === 'metricas') return await servirMetricas('basicas', getMetricas, req, res);
+      if (recurso === 'metricas-avanzadas') return await servirMetricas('avanzadas', getMetricasAvanzadas, req, res);
+      if (recurso === 'publico-objetivo') return await servirMetricas('perfil', calcularPerfilJson, req, res);
       // Los export-* devuelven un archivo (PDF/CSV), no JSON — si algo dentro tira,
       // el catch de más abajo los mandaría igual por el camino genérico de
       // "Error inesperado." sin ninguna pista. Acá sí se envuelve cada uno para
@@ -79,6 +91,7 @@ export default async function handler(req, res) {
       if (recurso === 'export-turnos') return await conError(exportTurnos, req, res);
       if (recurso === 'export-perfil-anonimo') return await conError(exportPerfilPacientes, req, res);
       if (recurso === 'export-pacientes-completo') return await conError(exportPacientesCompleto, req, res);
+      if (recurso === 'export-audiencia') return await conError(exportAudiencia, req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
@@ -442,6 +455,109 @@ async function getMonitoreo(req, res) {
   resultados.ok = resultados.calendar === 'ok' && resultados.pacientes === 'ok';
 
   res.status(200).json(resultados);
+}
+
+// ---------- 9.0 Snapshot diario de métricas ----------
+// Las métricas se precalculan una vez por día (cron de las 2:00 AM Argentina) y se
+// guardan en la hoja de configuración del panel. Al abrir el dashboard se sirve ese
+// último snapshot al instante; el botón "Actualizar" (forzar=1) recalcula en vivo y
+// además refresca el snapshot. Una celda de Sheets admite 50.000 caracteres, así que el
+// JSON se comprime (gzip + base64) y se parte en tramos de 40.000.
+const TRAMO_SNAPSHOT = 40000;
+
+async function guardarSnapshot(nombre, data) {
+  const comprimido = zlib.gzipSync(JSON.stringify({ generadoEn: new Date().toISOString(), data })).toString('base64');
+  const tramos = [];
+  for (let i = 0; i < comprimido.length; i += TRAMO_SNAPSHOT) tramos.push(comprimido.slice(i, i + TRAMO_SNAPSHOT));
+  for (let i = 0; i < tramos.length; i++) await setConfig(`snap-${nombre}-${i}`, tramos[i]);
+  await setConfig(`snap-${nombre}-n`, tramos.length); // al final: recién ahí el snapshot nuevo "cuenta"
+}
+
+async function leerSnapshot(nombre) {
+  const n = await getConfig(`snap-${nombre}-n`, 0);
+  if (!n) return null;
+  let comprimido = '';
+  for (let i = 0; i < n; i++) {
+    const tramo = await getConfig(`snap-${nombre}-${i}`, null);
+    if (tramo == null) return null;
+    comprimido += tramo;
+  }
+  return JSON.parse(zlib.gunzipSync(Buffer.from(comprimido, 'base64')).toString('utf8'));
+}
+
+// Corre un handler existente (que responde con res.status().json()) y devuelve el JSON.
+function capturarJson(fn, req) {
+  return new Promise((resolve, reject) => {
+    const falsoRes = { status() { return falsoRes; }, json(d) { resolve(d); return falsoRes; } };
+    Promise.resolve(fn(req, falsoRes)).catch(reject);
+  });
+}
+
+async function servirMetricas(nombre, calcular, req, res) {
+  const dias = Number(req.query.dias) || 30;
+  if (dias === 30 && !req.query.forzar) {
+    const snap = await leerSnapshot(nombre).catch(() => null);
+    if (snap) return res.status(200).json({ ...snap.data, generadoEn: snap.generadoEn, desdeCache: true });
+  }
+  const data = await capturarJson(calcular, req);
+  if (dias === 30 && !data.errores?.length && data.success !== false) await guardarSnapshot(nombre, data).catch((err) => console.warn('[admin.js] no se pudo guardar el snapshot:', err?.message || err));
+  return res.status(200).json({ ...data, generadoEn: new Date().toISOString(), desdeCache: false });
+}
+
+// Perfil de pacientes (buyer persona) en JSON: reutiliza el export anónimo (12 meses).
+function calcularPerfilJson(_req, res) {
+  return exportPerfilPacientes({ query: { meses: 12, formato: 'json' } }, res);
+}
+
+const PARTES_METRICAS = {
+  basicas: () => capturarJson(getMetricas, { query: { dias: 30, forzar: 1 } }),
+  avanzadas: () => capturarJson(getMetricasAvanzadas, { query: { dias: 30, forzar: 1 } }),
+  perfil: () => capturarJson(calcularPerfilJson, {}),
+};
+
+async function calcularYGuardarParte(nombre) {
+  try {
+    const data = await PARTES_METRICAS[nombre]();
+    if (data.success === false || data.errores?.length) return `no se guardó: ${data.error || data.errores.join(' · ')}`;
+    await guardarSnapshot(nombre, data);
+    return 'ok';
+  } catch (err) {
+    await avisarFallo({ endpoint: 'api/gestion/admin.js', detalle: `metricas-cron ${nombre}`, error: err });
+    return `error: ${err?.message || err}`;
+  }
+}
+
+// Cada parte pesada corre en su PROPIA invocación (límite de 300 s por separado): la tarea
+// principal solo las dispara y espera, así el conjunto no se pasa del tiempo máximo.
+async function metricasCron(req, res, viaCron) {
+  const parte = req.query.parte;
+  if (parte) {
+    if (!PARTES_METRICAS[parte]) return res.status(400).json({ success: false, error: 'parte inválida' });
+    return res.status(200).json({ success: true, parte, resultado: await calcularYGuardarParte(parte) });
+  }
+  const resultado = {};
+  const host = req.headers?.host;
+  const secreto = process.env.CRON_SECRET;
+  const headers = secreto ? { authorization: `Bearer ${secreto}` } : {};
+  const key = req.query.key ? `&key=${encodeURIComponent(req.query.key)}` : '';
+  await Promise.all(Object.keys(PARTES_METRICAS).map(async (nombre) => {
+    try {
+      const r = await fetch(`https://${host}/api/gestion/admin?recurso=metricas-cron&parte=${nombre}${key}`, { headers, signal: AbortSignal.timeout(285000) });
+      const j = await r.json().catch(() => ({}));
+      resultado[nombre] = j.resultado || `HTTP ${r.status}`;
+    } catch (err) {
+      resultado[nombre] = `sin respuesta a tiempo (puede seguir corriendo): ${err?.message || err}`;
+    }
+  }));
+  // Vercel Hobby permite solo 2 crons: este reemplaza al del chequeo de salud, así que lo
+  // dispara acá mismo (mejor esfuerzo, no cambia el resultado de las métricas).
+  if (viaCron && secreto && host) {
+    try {
+      await fetch(`https://${host}/api/gestion/pacientes?modo=healthcheck`, { headers });
+      resultado.healthcheck = 'ok';
+    } catch (err) { resultado.healthcheck = `error: ${err?.message || err}`; }
+  }
+  return res.status(200).json({ success: true, generadoEn: new Date().toISOString(), resultado });
 }
 
 // ---------- 9. Dashboard de métricas ----------
@@ -1028,6 +1144,56 @@ async function exportPacientesCsv(req, res) {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="pacientes.csv"');
   res.status(200).send('﻿' + csv);
+}
+
+// ---------- Audiencias para Meta Ads y Google Ads (listas de clientes / Customer Match) ----------
+// Solo datos de contacto (email, teléfono, nombre, apellido, país) — NUNCA tratamientos,
+// saldos, obra social ni nada de la historia clínica. Salen en texto plano: Meta y Google
+// los normalizan y los hashean (SHA-256) ellos mismos al subir el CSV desde su web.
+// Formatos oficiales (verificados 2026-10-18):
+//   Google Ads (Customer Match): columnas Email, Phone, First Name, Last Name, Country.
+//     Teléfono en E.164 con país (el "+" es opcional en texto plano), país ISO de 2 letras.
+//   Meta (lista de clientes): columnas email, phone, fn, ln, country (ISO 2 letras).
+//     El teléfono lleva código de país.
+// Teléfonos argentinos: los guardamos como los últimos 10 dígitos (área + número, sin 0 ni 15);
+// el formato E.164 de un celular argentino es +54 9 + esos 10 dígitos.
+function telefonoE164Argentina(tel) {
+  const d = normalizarTelefonoMapeo(tel);
+  return d.length === 10 ? `+549${d}` : '';
+}
+
+async function exportAudiencia(req, res) {
+  const plataforma = req.query.plataforma === 'google' ? 'google' : 'meta';
+  const filas = await listarPacientesConsolidados();
+  const encabezado = plataforma === 'google'
+    ? ['Email', 'Phone', 'First Name', 'Last Name', 'Country']
+    : ['email', 'phone', 'fn', 'ln', 'country'];
+  const emailValido = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+  const vistos = new Set();
+  const salida = [];
+  let sinContacto = 0;
+  for (const f of filas) {
+    const email = String(f.email || '').trim().toLowerCase();
+    const mail = emailValido(email) ? email : '';
+    const phone = telefonoE164Argentina(f.telefono);
+    if (!mail && !phone) { sinContacto++; continue; }
+    const clave = mail || phone;
+    if (vistos.has(clave)) continue; // la misma persona dos veces no suma
+    vistos.add(clave);
+    salida.push([
+      mail, phone,
+      String(f.nombre || '').trim().toLowerCase(),
+      String(f.apellido || '').trim().toLowerCase(),
+      'AR',
+    ]);
+  }
+  const csv = [encabezado, ...salida].map((fila) => fila.map(csvEscape).join(',')).join('\n');
+  const hoy = formatArgDay(new Date());
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="audiencia_${plataforma}_ads_${hoy}.csv"`);
+  res.setHeader('X-Contactos', String(salida.length));
+  res.setHeader('X-Sin-Contacto', String(sinContacto));
+  res.status(200).send(csv);
 }
 
 function csvEscape(v) {

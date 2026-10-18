@@ -572,6 +572,7 @@
       </div>
       <div class="mov-btns">
         <button class="btn-add-mov" id="btn-add-mov">+ Agregar movimiento</button>
+        <button class="btn-add-mov" id="btn-add-mov-entrega">+ Entrega de dinero</button>
         <button class="btn-add-mov secondary" id="btn-add-mov-historica">+ Carga histórica</button>
       </div>
     </div>
@@ -579,7 +580,7 @@
     <div class="panel reveal hidden" id="panel-mov">
       <h2 id="mov-form-titulo">Nuevo movimiento</h2>
       <div class="field-row">
-        <div class="field"><label>Fecha</label><input type="date" id="mov-fecha"></div>
+        <div class="field"><label>Fecha</label><div style="display:flex; gap:8px; align-items:center;"><input type="date" id="mov-fecha"><button type="button" class="btn-add-mov secondary" id="mov-fecha-hoy" style="padding:8px 12px;">Hoy</button></div></div>
       </div>
       <p class="hidden" id="mov-fecha-hint-historica" style="color: var(--muted); font-size: 12px; margin: -6px 0 4px;">
         Si no sabés la fecha exacta de una deuda vieja, usá una fecha aproximada (ej. el primer día del mes) — no se puede guardar sin fecha.
@@ -1599,13 +1600,55 @@
     renderPrestaciones();
   }
 
+  // Orden por la fecha cargada en cada fila (no por orden de carga/edición): más vieja
+  // arriba, más nueva abajo. Empates conservan el orden de la planilla; filas sin fecha
+  // interpretable van al final. Acepta "D/M/AAAA", "AAAA-MM-DD" y serial de planilla.
+  function claveFecha(valor) {
+    const t = String(valor == null ? '' : valor).trim();
+    let m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1]);
+    m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    if (/^\d+(\.\d+)?$/.test(t) && +t > 20000 && +t < 60000) return Date.UTC(1899, 11, 30) + Math.floor(+t) * 86400000;
+    return Infinity;
+  }
+  function ordenarPorFecha(lista) {
+    return lista
+      .map((x, i) => ({ x, i, k: claveFecha(x.fecha) }))
+      .sort((a, b) => (a.k === b.k ? a.i - b.i : a.k < b.k ? -1 : 1))
+      .map((o) => o.x);
+  }
+
+  // Importe en texto ("$1.250,50", "1250", "1.000") -> número. Vacío o ilegible = 0.
+  function numeroImporte(v) {
+    let t = String(v == null ? '' : v).replace(/[^\d.,-]/g, '');
+    if (!t) return 0;
+    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');
+    const n = parseFloat(t);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function formatoImporte(n) {
+    const abs = Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (n < 0 ? '-$' : '$') + abs;
+  }
+  // El saldo se recalcula acá en el orden de fecha mostrado (Debe - Haber acumulado), para
+  // que siempre refleje lo que realmente se debe aunque se cargue un movimiento con fecha vieja.
+  function movimientosConSaldo(lista) {
+    let acum = 0;
+    return ordenarPorFecha(lista).map((m) => {
+      if (!m.anulado) acum += numeroImporte(m.debe) - numeroImporte(m.haber);
+      return { ...m, saldo: formatoImporte(acum) };
+    });
+  }
+
   function renderMovimientos() {
     const tbody = document.getElementById('mov-tbody');
     if (!fichaActual.movimientos.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted); text-align:center; padding:16px;">Sin movimientos todavía.</td></tr>';
       return;
     }
-    tbody.innerHTML = fichaActual.movimientos.map((m) => `
+    tbody.innerHTML = movimientosConSaldo(fichaActual.movimientos).map((m) => `
       <tr class="${m.anulado ? 'anulado' : ''}" data-fila="${m.fila}">
         <td>${escapeHtml(m.fecha)}</td>
         <td>${escapeHtml(m.tratamiento)}</td>
@@ -1749,6 +1792,11 @@
   [movDebe, movHaber, movTratamiento].forEach((el) => el.addEventListener('input', actualizarHintTipo));
 
   document.getElementById('btn-add-mov').addEventListener('click', () => abrirFormMov(null, false));
+  document.getElementById('btn-add-mov-entrega').addEventListener('click', () => abrirFormMov(null, false, true));
+  document.getElementById('mov-fecha-hoy').addEventListener('click', () => {
+    movFecha.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+    movFecha.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   document.getElementById('btn-add-mov-historica').addEventListener('click', () => abrirFormMov(null, true));
   document.getElementById('mov-cancelar').addEventListener('click', cerrarFormMov);
 
@@ -1777,7 +1825,7 @@
   const movFechaHintHistorica = document.getElementById('mov-fecha-hint-historica');
 
   let movSesionId = 0; // token: cada apertura del form invalida flushes/guardados viejos
-  function abrirFormMov(fila, historica) {
+  function abrirFormMov(fila, historica, entrega) {
     editandoMovFila = fila;
     // Autosave (tipo Google Sheets): estado del formulario recién abierto. movFilaCreada
     // solo se setea cuando el AUTOSAVE crea la fila (movimiento nuevo) — una fila
@@ -1804,7 +1852,7 @@
       movHaber.value = montoSheetANumero(mov.haber);
       movFormaPago.value = mov.formaPago || '';
     } else {
-      document.getElementById('mov-form-titulo').textContent = cargaHistorica ? 'Carga histórica' : 'Nuevo movimiento';
+      document.getElementById('mov-form-titulo').textContent = entrega ? 'Entrega de dinero' : (cargaHistorica ? 'Carga histórica' : 'Nuevo movimiento');
       movFecha.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
       movFechaGuardada = null; // todavía no se guardó nada: el alta confirmará solo
       movTratamiento.value = '';
@@ -1816,9 +1864,17 @@
     // una fila vieja ya sin fecha (protegida por el fix de primeraFilaLibre(), ver
     // decisions.md) no hace falta inventarle ninguna.
     movFechaHintHistorica.classList.toggle('hidden', !(cargaHistorica && !fila));
+    // Modo "Entrega de dinero": mismo formulario, pero solo fecha + monto + forma de pago
+    // (sin tratamiento ni Debe). Se guarda como un pago normal (Haber), igual que siempre.
+    const modoEntrega = !!entrega && !fila;
+    modoEntregaActivo = modoEntrega;
+    movTratamiento.closest('.field-row').style.display = modoEntrega ? 'none' : '';
+    movDebe.closest('.field').style.display = modoEntrega ? 'none' : '';
+    movHaber.previousElementSibling.textContent = modoEntrega ? 'Monto entregado' : 'Haber (pago)';
     actualizarHintTipo();
     mostrarAnimado(panelMov);
     panelMov.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (modoEntrega) movHaber.focus({ preventScroll: true });
   }
 
   // ---------- AUTOSAVE tipo Google Sheets (pedido 2026-08-25) ----------
@@ -1855,12 +1911,20 @@
   }
   let movAutosaveHintTimer = null;
 
+  // true mientras está abierto el form en modo "Entrega de dinero" (ver abrirFormMov).
+  let modoEntregaActivo = false;
+  const DESCRIPCION_ENTREGA = 'Entrega de dinero';
   function datosMovActuales() {
+    const haber = movHaber.value ? Number(movHaber.value) : 0;
+    let tratamiento = movTratamiento.value.trim();
+    // En modo entrega no hay campo de tratamiento: la descripción se agrega recién al
+    // guardar, cuando ya hay un monto (así abrir y cerrar el form sin monto no deja filas).
+    if (modoEntregaActivo && !tratamiento && haber > 0) tratamiento = DESCRIPCION_ENTREGA;
     return {
       fecha: movFecha.value,
-      tratamiento: movTratamiento.value.trim(),
+      tratamiento,
       debe: movDebe.value ? Number(movDebe.value) : 0,
-      haber: movHaber.value ? Number(movHaber.value) : 0,
+      haber,
       formaPago: movFormaPago.value.trim(),
     };
   }
@@ -2526,7 +2590,7 @@
       tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted); text-align:center; padding:16px;">Sin prestaciones cargadas todavía.</td></tr>';
       return;
     }
-    tbody.innerHTML = lista.map((p) => `
+    tbody.innerHTML = ordenarPorFecha(lista).map((p) => `
       <tr data-fila="${p.fila}">
         <td>${escapeHtml(p.fecha)}</td>
         <td>${escapeHtml(p.tratamiento)}</td>

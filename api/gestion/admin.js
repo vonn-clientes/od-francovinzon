@@ -3,6 +3,7 @@
 // Hobby (ver CLAUDE.md). Lecturas por GET con `recurso` (+ `modo` cuando hace falta),
 // escrituras por POST con `recurso` + `accion`. Clave propia: ADMIN_KEY
 // (lib/adminAuth.js), nunca GESTION_KEY — Ayelen no tiene acceso acá.
+import zlib from 'node:zlib';
 import { isValidAdminKey } from '../../lib/adminAuth.js';
 import { isValidGestionKey } from '../../lib/googleCalendar.js';
 import {
@@ -45,6 +46,15 @@ export default async function handler(req, res) {
     const key = req.method === 'GET' ? req.query.key : req.body.key;
     const recurso = req.method === 'GET' ? req.query.recurso : req.body.recurso;
 
+    // Actualización diaria de métricas (cron de Vercel, 2:00 AM Argentina, ver vercel.json):
+    // se autentica con CRON_SECRET (header Authorization) o, a mano, con ADMIN_KEY.
+    if (req.method === 'GET' && recurso === 'metricas-cron') {
+      const secreto = process.env.CRON_SECRET;
+      const viaCron = !!secreto && (req.headers.authorization || '') === `Bearer ${secreto}`;
+      if (!viaCron && !isValidAdminKey(key)) return res.status(401).json({ success: false, error: 'unauthorized' });
+      return await conError((rq, rs) => metricasCron(rq, rs, viaCron), req, res);
+    }
+
     // login-log: registro de actividad ("quién entró a /gestion" del pedido, sección 7)
     // — cualquiera de las dos claves puede escribir ahí, no expone ni cambia nada.
     const esLoginLog = req.method === 'POST' && recurso === 'login-log';
@@ -66,8 +76,8 @@ export default async function handler(req, res) {
       if (recurso === 'radios') return await getRadios(req, res);
       if (recurso === 'actividad') return await getActividad(req, res);
       if (recurso === 'monitoreo') return await getMonitoreo(req, res);
-      if (recurso === 'metricas') return await getMetricas(req, res);
-      if (recurso === 'metricas-avanzadas') return await getMetricasAvanzadas(req, res);
+      if (recurso === 'metricas') return await servirMetricas('basicas', getMetricas, req, res);
+      if (recurso === 'metricas-avanzadas') return await servirMetricas('avanzadas', getMetricasAvanzadas, req, res);
       // Los export-* devuelven un archivo (PDF/CSV), no JSON — si algo dentro tira,
       // el catch de más abajo los mandaría igual por el camino genérico de
       // "Error inesperado." sin ninguna pista. Acá sí se envuelve cada uno para
@@ -442,6 +452,79 @@ async function getMonitoreo(req, res) {
   resultados.ok = resultados.calendar === 'ok' && resultados.pacientes === 'ok';
 
   res.status(200).json(resultados);
+}
+
+// ---------- 9.0 Snapshot diario de métricas ----------
+// Las métricas se precalculan una vez por día (cron de las 2:00 AM Argentina) y se
+// guardan en la hoja de configuración del panel. Al abrir el dashboard se sirve ese
+// último snapshot al instante; el botón "Actualizar" (forzar=1) recalcula en vivo y
+// además refresca el snapshot. Una celda de Sheets admite 50.000 caracteres, así que el
+// JSON se comprime (gzip + base64) y se parte en tramos de 40.000.
+const TRAMO_SNAPSHOT = 40000;
+
+async function guardarSnapshot(nombre, data) {
+  const comprimido = zlib.gzipSync(JSON.stringify({ generadoEn: new Date().toISOString(), data })).toString('base64');
+  const tramos = [];
+  for (let i = 0; i < comprimido.length; i += TRAMO_SNAPSHOT) tramos.push(comprimido.slice(i, i + TRAMO_SNAPSHOT));
+  for (let i = 0; i < tramos.length; i++) await setConfig(`snap-${nombre}-${i}`, tramos[i]);
+  await setConfig(`snap-${nombre}-n`, tramos.length); // al final: recién ahí el snapshot nuevo "cuenta"
+}
+
+async function leerSnapshot(nombre) {
+  const n = await getConfig(`snap-${nombre}-n`, 0);
+  if (!n) return null;
+  let comprimido = '';
+  for (let i = 0; i < n; i++) {
+    const tramo = await getConfig(`snap-${nombre}-${i}`, null);
+    if (tramo == null) return null;
+    comprimido += tramo;
+  }
+  return JSON.parse(zlib.gunzipSync(Buffer.from(comprimido, 'base64')).toString('utf8'));
+}
+
+// Corre un handler existente (que responde con res.status().json()) y devuelve el JSON.
+function capturarJson(fn, req) {
+  return new Promise((resolve, reject) => {
+    const falsoRes = { status() { return falsoRes; }, json(d) { resolve(d); return falsoRes; } };
+    Promise.resolve(fn(req, falsoRes)).catch(reject);
+  });
+}
+
+async function servirMetricas(nombre, calcular, req, res) {
+  const dias = Number(req.query.dias) || 30;
+  if (dias === 30 && !req.query.forzar) {
+    const snap = await leerSnapshot(nombre).catch(() => null);
+    if (snap) return res.status(200).json({ ...snap.data, generadoEn: snap.generadoEn, desdeCache: true });
+  }
+  const data = await capturarJson(calcular, req);
+  if (dias === 30 && !data.errores?.length) await guardarSnapshot(nombre, data).catch((err) => console.warn('[admin.js] no se pudo guardar el snapshot:', err?.message || err));
+  return res.status(200).json({ ...data, generadoEn: new Date().toISOString(), desdeCache: false });
+}
+
+async function metricasCron(req, res, viaCron) {
+  const q = { query: { dias: 30, forzar: 1 } };
+  const resultado = {};
+  // En serie (no en paralelo): mismo criterio que el resto del proyecto con la cuota de Google.
+  for (const [nombre, calcular] of [['basicas', getMetricas], ['avanzadas', getMetricasAvanzadas]]) {
+    try {
+      const data = await capturarJson(calcular, q);
+      if (data.errores?.length) { resultado[nombre] = `con errores, no se guardó: ${data.errores.join(' · ')}`; continue; }
+      await guardarSnapshot(nombre, data);
+      resultado[nombre] = 'ok';
+    } catch (err) {
+      resultado[nombre] = `error: ${err?.message || err}`;
+      await avisarFallo({ endpoint: 'api/gestion/admin.js', detalle: `metricas-cron ${nombre}`, error: err });
+    }
+  }
+  // Vercel Hobby permite solo 2 crons: este reemplaza al del chequeo de salud, así que lo
+  // dispara acá mismo (mejor esfuerzo, no cambia el resultado de las métricas).
+  if (viaCron && process.env.CRON_SECRET && req.headers?.host) {
+    try {
+      await fetch(`https://${req.headers.host}/api/gestion/pacientes?modo=healthcheck`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+      resultado.healthcheck = 'ok';
+    } catch (err) { resultado.healthcheck = `error: ${err?.message || err}`; }
+  }
+  return res.status(200).json({ success: true, generadoEn: new Date().toISOString(), resultado });
 }
 
 // ---------- 9. Dashboard de métricas ----------

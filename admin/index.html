@@ -180,7 +180,7 @@
       <div class="section" id="sec-dashboard">
         <div class="card">
           <h2>Dashboard de métricas</h2>
-          <p class="hint">Últimos <span id="dash-rango">30</span> días + próximos 60 (incluye turnos ya reservados a futuro). <button class="btn btn-outline" id="dash-refrescar" style="padding:5px 12px;font-size:11.5px;">Actualizar</button></p>
+          <p class="hint">Últimos <span id="dash-rango">30</span> días + próximos 60 (incluye turnos ya reservados a futuro). <span class="hint" id="dash-generado"></span> <button class="btn btn-outline" id="dash-refrescar" style="padding:5px 12px;font-size:11.5px;">Actualizar</button></p>
           <div class="stat-grid" id="dash-stats"></div>
           <h3 style="font-size:14px;margin-bottom:6px;">Turnos por día</h3>
           <div class="bars" id="dash-bars"></div>
@@ -558,6 +558,14 @@
   }
 
   // ---------- Dashboard ----------
+  // "Datos de hoy 02:00" / "Actualizado hace un momento": las métricas se precalculan todos
+  // los días a las 2:00 AM; el botón Actualizar recalcula en vivo.
+  function mostrarGenerado(m) {
+    const el = document.getElementById('dash-generado');
+    if (!el || !m || !m.generadoEn) return;
+    const cuando = new Date(m.generadoEn).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    el.textContent = m.desdeCache ? `Datos del ${cuando} (se actualizan solos a las 2:00).` : `Actualizado en vivo: ${cuando}.`;
+  }
   async function cargarDashboard(forzar) {
     // El cálculo de deuda recorre todas las fichas de /pacientes una por una — con
     // varias decenas de pacientes puede tardar unos segundos reales, no es un
@@ -570,6 +578,7 @@
     setMsg('dash-msg', '', '');
     try {
       const m = await apiGet('metricas', forzar ? { dias: 30, forzar: 1 } : { dias: 30 });
+      mostrarGenerado(m);
       document.getElementById('dash-rango').textContent = m.rangoDias;
       document.getElementById('dash-stats').innerHTML = [
         ['Turnos totales', m.totalTurnos],
@@ -641,6 +650,7 @@
     setMsg('dash2-msg', '', '');
     try {
       const m = await apiGet('metricas-avanzadas', forzar ? { forzar: 1 } : {});
+      mostrarGenerado(m);
 
       // (a) Ocupación
       const nombreMes = (o) => o ? new Date(o.anio, o.mes - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : '';

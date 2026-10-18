@@ -572,6 +572,7 @@
       </div>
       <div class="mov-btns">
         <button class="btn-add-mov" id="btn-add-mov">+ Agregar movimiento</button>
+        <button class="btn-add-mov" id="btn-add-mov-entrega">+ Entrega de dinero</button>
         <button class="btn-add-mov secondary" id="btn-add-mov-historica">+ Carga histórica</button>
       </div>
     </div>
@@ -579,7 +580,7 @@
     <div class="panel reveal hidden" id="panel-mov">
       <h2 id="mov-form-titulo">Nuevo movimiento</h2>
       <div class="field-row">
-        <div class="field"><label>Fecha</label><input type="date" id="mov-fecha"></div>
+        <div class="field"><label>Fecha</label><div style="display:flex; gap:8px; align-items:center;"><input type="date" id="mov-fecha"><button type="button" class="btn-add-mov secondary" id="mov-fecha-hoy" style="padding:8px 12px;">Hoy</button></div></div>
       </div>
       <p class="hidden" id="mov-fecha-hint-historica" style="color: var(--muted); font-size: 12px; margin: -6px 0 4px;">
         Si no sabés la fecha exacta de una deuda vieja, usá una fecha aproximada (ej. el primer día del mes) — no se puede guardar sin fecha.
@@ -1791,6 +1792,11 @@
   [movDebe, movHaber, movTratamiento].forEach((el) => el.addEventListener('input', actualizarHintTipo));
 
   document.getElementById('btn-add-mov').addEventListener('click', () => abrirFormMov(null, false));
+  document.getElementById('btn-add-mov-entrega').addEventListener('click', () => abrirFormMov(null, false, true));
+  document.getElementById('mov-fecha-hoy').addEventListener('click', () => {
+    movFecha.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+    movFecha.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   document.getElementById('btn-add-mov-historica').addEventListener('click', () => abrirFormMov(null, true));
   document.getElementById('mov-cancelar').addEventListener('click', cerrarFormMov);
 
@@ -1819,7 +1825,7 @@
   const movFechaHintHistorica = document.getElementById('mov-fecha-hint-historica');
 
   let movSesionId = 0; // token: cada apertura del form invalida flushes/guardados viejos
-  function abrirFormMov(fila, historica) {
+  function abrirFormMov(fila, historica, entrega) {
     editandoMovFila = fila;
     // Autosave (tipo Google Sheets): estado del formulario recién abierto. movFilaCreada
     // solo se setea cuando el AUTOSAVE crea la fila (movimiento nuevo) — una fila
@@ -1846,7 +1852,7 @@
       movHaber.value = montoSheetANumero(mov.haber);
       movFormaPago.value = mov.formaPago || '';
     } else {
-      document.getElementById('mov-form-titulo').textContent = cargaHistorica ? 'Carga histórica' : 'Nuevo movimiento';
+      document.getElementById('mov-form-titulo').textContent = entrega ? 'Entrega de dinero' : (cargaHistorica ? 'Carga histórica' : 'Nuevo movimiento');
       movFecha.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
       movFechaGuardada = null; // todavía no se guardó nada: el alta confirmará solo
       movTratamiento.value = '';
@@ -1858,9 +1864,16 @@
     // una fila vieja ya sin fecha (protegida por el fix de primeraFilaLibre(), ver
     // decisions.md) no hace falta inventarle ninguna.
     movFechaHintHistorica.classList.toggle('hidden', !(cargaHistorica && !fila));
+    // Modo "Entrega de dinero": mismo formulario, pero solo fecha + monto + forma de pago
+    // (sin tratamiento ni Debe). Se guarda como un pago normal (Haber), igual que siempre.
+    const modoEntrega = !!entrega && !fila;
+    movTratamiento.closest('.field-row').style.display = modoEntrega ? 'none' : '';
+    movDebe.closest('.field').style.display = modoEntrega ? 'none' : '';
+    movHaber.previousElementSibling.textContent = modoEntrega ? 'Monto entregado' : 'Haber (pago)';
     actualizarHintTipo();
     mostrarAnimado(panelMov);
     panelMov.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (modoEntrega) movHaber.focus({ preventScroll: true });
   }
 
   // ---------- AUTOSAVE tipo Google Sheets (pedido 2026-08-25) ----------

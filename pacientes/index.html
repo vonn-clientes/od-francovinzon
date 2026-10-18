@@ -1599,13 +1599,32 @@
     renderPrestaciones();
   }
 
+  // Orden por la fecha cargada en cada fila (no por orden de carga/edición): más vieja
+  // arriba, más nueva abajo. Empates conservan el orden de la planilla; filas sin fecha
+  // interpretable van al final. Acepta "D/M/AAAA", "AAAA-MM-DD" y serial de planilla.
+  function claveFecha(valor) {
+    const t = String(valor == null ? '' : valor).trim();
+    let m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1]);
+    m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    if (/^\d+(\.\d+)?$/.test(t) && +t > 20000 && +t < 60000) return Date.UTC(1899, 11, 30) + Math.floor(+t) * 86400000;
+    return Infinity;
+  }
+  function ordenarPorFecha(lista) {
+    return lista
+      .map((x, i) => ({ x, i, k: claveFecha(x.fecha) }))
+      .sort((a, b) => (a.k === b.k ? a.i - b.i : a.k < b.k ? -1 : 1))
+      .map((o) => o.x);
+  }
+
   function renderMovimientos() {
     const tbody = document.getElementById('mov-tbody');
     if (!fichaActual.movimientos.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted); text-align:center; padding:16px;">Sin movimientos todavía.</td></tr>';
       return;
     }
-    tbody.innerHTML = fichaActual.movimientos.map((m) => `
+    tbody.innerHTML = ordenarPorFecha(fichaActual.movimientos).map((m) => `
       <tr class="${m.anulado ? 'anulado' : ''}" data-fila="${m.fila}">
         <td>${escapeHtml(m.fecha)}</td>
         <td>${escapeHtml(m.tratamiento)}</td>
@@ -2526,7 +2545,7 @@
       tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted); text-align:center; padding:16px;">Sin prestaciones cargadas todavía.</td></tr>';
       return;
     }
-    tbody.innerHTML = lista.map((p) => `
+    tbody.innerHTML = ordenarPorFecha(lista).map((p) => `
       <tr data-fila="${p.fila}">
         <td>${escapeHtml(p.fecha)}</td>
         <td>${escapeHtml(p.tratamiento)}</td>

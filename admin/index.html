@@ -378,6 +378,13 @@
             <button class="btn btn-outline" id="p-export-perfil">Exportar perfil anónimo (CSV)</button>
           </div>
           <div class="msg" id="p-perfil-msg"></div>
+          <h3 style="font-size:14px;margin:16px 0 8px;">Audiencias para Meta Ads y Google Ads</h3>
+          <p class="hint">Lista de contactos (email, teléfono, nombre y apellido) lista para subir como audiencia personalizada de Meta o como Customer Match de Google Ads. No incluye tratamientos, saldos ni datos de salud. Meta y Google piden al menos unos cientos de contactos para que la audiencia sirva. Se descarga como CSV (se abre en Excel).</p>
+          <div class="row-actions">
+            <button class="btn btn-outline" id="p-export-meta">Descargar para Meta Ads (CSV)</button>
+            <button class="btn btn-outline" id="p-export-google">Descargar para Google Ads (CSV)</button>
+          </div>
+          <div class="msg" id="p-audiencia-msg"></div>
         </div>
       </div>
 
@@ -1053,6 +1060,12 @@
   });
   document.getElementById('p-export-completo-md').addEventListener('click', (e) => {
     descargarExport(`/api/gestion/admin?recurso=export-pacientes-completo&formato=md&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-completo-msg', 'pacientes.md');
+  });
+  document.getElementById('p-export-meta').addEventListener('click', (e) => {
+    descargarExport(`/api/gestion/admin?recurso=export-audiencia&plataforma=meta&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-audiencia-msg', 'audiencia_meta_ads.csv');
+  });
+  document.getElementById('p-export-google').addEventListener('click', (e) => {
+    descargarExport(`/api/gestion/admin?recurso=export-audiencia&plataforma=google&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-audiencia-msg', 'audiencia_google_ads.csv');
   });
   document.getElementById('p-export-turnos-csv').addEventListener('click', () => {
     const desde = document.getElementById('p-turnos-desde').value;

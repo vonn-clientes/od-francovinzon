@@ -79,6 +79,7 @@ export default async function handler(req, res) {
       if (recurso === 'monitoreo') return await getMonitoreo(req, res);
       if (recurso === 'metricas') return await servirMetricas('basicas', getMetricas, req, res);
       if (recurso === 'metricas-avanzadas') return await servirMetricas('avanzadas', getMetricasAvanzadas, req, res);
+      if (recurso === 'publico-objetivo') return await servirMetricas('perfil', calcularPerfilJson, req, res);
       // Los export-* devuelven un archivo (PDF/CSV), no JSON — si algo dentro tira,
       // el catch de más abajo los mandaría igual por el camino genérico de
       // "Error inesperado." sin ninguna pista. Acá sí se envuelve cada uno para
@@ -499,30 +500,60 @@ async function servirMetricas(nombre, calcular, req, res) {
     if (snap) return res.status(200).json({ ...snap.data, generadoEn: snap.generadoEn, desdeCache: true });
   }
   const data = await capturarJson(calcular, req);
-  if (dias === 30 && !data.errores?.length) await guardarSnapshot(nombre, data).catch((err) => console.warn('[admin.js] no se pudo guardar el snapshot:', err?.message || err));
+  if (dias === 30 && !data.errores?.length && data.success !== false) await guardarSnapshot(nombre, data).catch((err) => console.warn('[admin.js] no se pudo guardar el snapshot:', err?.message || err));
   return res.status(200).json({ ...data, generadoEn: new Date().toISOString(), desdeCache: false });
 }
 
-async function metricasCron(req, res, viaCron) {
-  const q = { query: { dias: 30, forzar: 1 } };
-  const resultado = {};
-  // En serie (no en paralelo): mismo criterio que el resto del proyecto con la cuota de Google.
-  for (const [nombre, calcular] of [['basicas', getMetricas], ['avanzadas', getMetricasAvanzadas]]) {
-    try {
-      const data = await capturarJson(calcular, q);
-      if (data.errores?.length) { resultado[nombre] = `con errores, no se guardó: ${data.errores.join(' · ')}`; continue; }
-      await guardarSnapshot(nombre, data);
-      resultado[nombre] = 'ok';
-    } catch (err) {
-      resultado[nombre] = `error: ${err?.message || err}`;
-      await avisarFallo({ endpoint: 'api/gestion/admin.js', detalle: `metricas-cron ${nombre}`, error: err });
-    }
+// Perfil de pacientes (buyer persona) en JSON: reutiliza el export anónimo (12 meses).
+function calcularPerfilJson(_req, res) {
+  return exportPerfilPacientes({ query: { meses: 12, formato: 'json' } }, res);
+}
+
+const PARTES_METRICAS = {
+  basicas: () => capturarJson(getMetricas, { query: { dias: 30, forzar: 1 } }),
+  avanzadas: () => capturarJson(getMetricasAvanzadas, { query: { dias: 30, forzar: 1 } }),
+  perfil: () => capturarJson(calcularPerfilJson, {}),
+};
+
+async function calcularYGuardarParte(nombre) {
+  try {
+    const data = await PARTES_METRICAS[nombre]();
+    if (data.success === false || data.errores?.length) return `no se guardó: ${data.error || data.errores.join(' · ')}`;
+    await guardarSnapshot(nombre, data);
+    return 'ok';
+  } catch (err) {
+    await avisarFallo({ endpoint: 'api/gestion/admin.js', detalle: `metricas-cron ${nombre}`, error: err });
+    return `error: ${err?.message || err}`;
   }
+}
+
+// Cada parte pesada corre en su PROPIA invocación (límite de 300 s por separado): la tarea
+// principal solo las dispara y espera, así el conjunto no se pasa del tiempo máximo.
+async function metricasCron(req, res, viaCron) {
+  const parte = req.query.parte;
+  if (parte) {
+    if (!PARTES_METRICAS[parte]) return res.status(400).json({ success: false, error: 'parte inválida' });
+    return res.status(200).json({ success: true, parte, resultado: await calcularYGuardarParte(parte) });
+  }
+  const resultado = {};
+  const host = req.headers?.host;
+  const secreto = process.env.CRON_SECRET;
+  const headers = secreto ? { authorization: `Bearer ${secreto}` } : {};
+  const key = req.query.key ? `&key=${encodeURIComponent(req.query.key)}` : '';
+  await Promise.all(Object.keys(PARTES_METRICAS).map(async (nombre) => {
+    try {
+      const r = await fetch(`https://${host}/api/gestion/admin?recurso=metricas-cron&parte=${nombre}${key}`, { headers, signal: AbortSignal.timeout(285000) });
+      const j = await r.json().catch(() => ({}));
+      resultado[nombre] = j.resultado || `HTTP ${r.status}`;
+    } catch (err) {
+      resultado[nombre] = `sin respuesta a tiempo (puede seguir corriendo): ${err?.message || err}`;
+    }
+  }));
   // Vercel Hobby permite solo 2 crons: este reemplaza al del chequeo de salud, así que lo
   // dispara acá mismo (mejor esfuerzo, no cambia el resultado de las métricas).
-  if (viaCron && process.env.CRON_SECRET && req.headers?.host) {
+  if (viaCron && secreto && host) {
     try {
-      await fetch(`https://${req.headers.host}/api/gestion/pacientes?modo=healthcheck`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } });
+      await fetch(`https://${host}/api/gestion/pacientes?modo=healthcheck`, { headers });
       resultado.healthcheck = 'ok';
     } catch (err) { resultado.healthcheck = `error: ${err?.message || err}`; }
   }

@@ -316,6 +316,38 @@ async function tareas(req, res) {
       ...(sobreturnos.data.items || []).map((ev) => ({ ev, calendarId: SOBRETURNOS_CALENDAR_ID })),
     ];
 
+    // Cruza cada turno con el índice central antes de generar recordatorios. Hasta
+    // ahora se miraba solo la descripción del evento: si el DNI/teléfono ya estaba
+    // en la ficha, igual aparecía “Agregar DNI/teléfono”. DNI exacto tiene prioridad;
+    // el nombre solo se usa si identifica una única ficha.
+    let pacientes = [];
+    try { pacientes = await listarPacientesConsolidados(); } catch (err) {
+      console.warn('[buscar.js] no se pudo cruzar tareas con fichas:', err?.message || err);
+    }
+    const porDniFicha = new Map();
+    const porNombreFicha = new Map();
+    for (const p of pacientes.filter((x) => x.fichaId)) {
+      const dni = normalizarDni(p.dni);
+      if (dni) {
+        if (!porDniFicha.has(dni)) porDniFicha.set(dni, new Map());
+        porDniFicha.get(dni).set(p.fichaId, p);
+      }
+      const nombre = normalizarTexto(`${p.nombre} ${p.apellido}`);
+      if (nombre) {
+        if (!porNombreFicha.has(nombre)) porNombreFicha.set(nombre, new Map());
+        porNombreFicha.get(nombre).set(p.fichaId, p);
+      }
+    }
+    const fichaPorTurno = (ev) => {
+      const dni = normalizarDni(extraerDni(ev.description));
+      const porDni = dni ? porDniFicha.get(dni) : null;
+      if (porDni?.size === 1) return [...porDni.values()][0];
+      if (porDni?.size > 1) return null; // DNI duplicado: no adivinar.
+      const nombre = normalizarTexto(ev.summary || '');
+      const porNombre = porNombreFicha.get(nombre);
+      return porNombre?.size === 1 ? [...porNombre.values()][0] : null;
+    };
+
     const sinTelefono = [];
     const sinDni = [];
     const bloqueos = [];
@@ -349,8 +381,9 @@ async function tareas(req, res) {
       // turno (ver el pedido) — por eso, si falta, queda como recordatorio acá en vez de
       // bloquear la carga.
       if (start < limiteSinTelefono) {
+        const ficha = fichaPorTurno(ev);
         const telefono = extraerTelefono(ev.description);
-        if (!telefono) {
+        if (!telefono && !ficha?.telefono) {
           sinTelefono.push({
             id: ev.id,
             calendarId,
@@ -358,7 +391,7 @@ async function tareas(req, res) {
             start: start.toISOString(),
           });
         }
-        if (!extraerDni(ev.description)) {
+        if (!extraerDni(ev.description) && !ficha?.dni) {
           sinDni.push({
             id: ev.id,
             calendarId,

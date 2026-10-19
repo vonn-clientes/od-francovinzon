@@ -21,7 +21,7 @@ import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
   leerActividadReciente, leerAlertasRecientes,
 } from '../../lib/adminConfig.js';
-import { listarPacientesConsolidados, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre, desasignarFila } from '../../lib/pacientesConsolidados.js';
+import { listarPacientesConsolidados, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre, candidatasParaFicha, desasignarFila } from '../../lib/pacientesConsolidados.js';
 import { normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
 import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
@@ -1092,6 +1092,7 @@ async function getSinFicha(req, res) {
     .filter((f) => !f.fichaId)
     .map((f) => ({
       sugerida: sug.has(f.fila) ? { id: sug.get(f.fila), nombre: nombreFicha.get(sug.get(f.fila)) } : null,
+      candidatas: candidatasParaFicha(f, filas),
       fila: f.fila, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni, telefono: f.telefono,
       turnosPasados: f.turnosPasados || 0, ultimaVisita: f.ultimaVisita || '',
     }))

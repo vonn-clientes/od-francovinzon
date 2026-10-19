@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-19 — Sugerencias de fichas por nombre y DNI en /admin
+- En "Pacientes sin ficha asignada", mostrar hasta tres fichas candidatas ordenadas por DNI exacto, nombre exacto y parecido del nombre.
+- Indicar por qué aparece cada sugerencia y abrir el selector con esa ficha preseleccionada; la asignación sigue requiriendo confirmación.
+- Un nombre exacto con DNI distinto queda visible para revisión, pero fuera de la asignación en lote. Las coincidencias difusas también requieren selección manual.
+
 ## 2026-10-19 — Selector de fichas y autocompletado de turnos
 
 - Corregido el orden del modal “Elegir ficha” en `/admin`: sus controles ahora existen antes de registrar eventos, así que el selector abre; fichas seleccionables por teclado, cierre con Escape y foco devuelto al botón que lo abrió.

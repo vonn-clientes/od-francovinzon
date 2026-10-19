@@ -152,6 +152,10 @@
   .sf-item.sel { background: #FBF3E0; outline: 2px solid #D4A24C; outline-offset: -2px; }
   .sf-acciones { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   .sf-ok { color: #1f7a45; font-weight: 600; }
+  .sf-candidatas { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:180px; }
+  .sf-candidatas-label { color:var(--muted); font-size:11px; font-weight:600; }
+  .sf-candidata { text-align:left; white-space:normal; line-height:1.3; }
+  .sf-candidata small { display:block; color:var(--muted); font-size:11px; }
 </style>
 </head>
 <body>
@@ -258,7 +262,7 @@
 
         <div class="card" id="card-sin-ficha">
           <h2>Pacientes sin ficha asignada</h2>
-          <p class="hint">Personas que sacaron turno pero no están vinculadas a ninguna ficha. Si el nombre coincide con una ficha, un toque la asigna. Si no, "Elegir ficha" abre un buscador.</p>
+          <p class="hint">Personas que sacaron turno pero todavía no están vinculadas a una ficha. Revisá las posibles coincidencias: el DNI exacto tiene prioridad; también se muestran nombres exactos o muy parecidos. Si el nombre coincide pero el DNI es distinto, queda señalado para revisar. Confirmá la ficha antes de vincularla.</p>
           <button class="btn btn-primary hidden" id="sf-lote" style="margin-bottom:8px;"></button>
           <div id="sf-msg" class="msg"></div>
           <div class="table-wrap"><table id="sf-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Ficha</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -474,7 +478,7 @@
 <div class="sf-modal hidden" id="sf-modal" role="dialog" aria-modal="true" aria-labelledby="sf-modal-titulo" aria-describedby="sf-modal-ayuda">
   <div class="sf-box">
     <h3 id="sf-modal-titulo">Elegir ficha</h3>
-    <p class="hint" id="sf-modal-ayuda" style="margin:0;">Buscá por nombre, apellido o DNI y elegí la ficha correcta.</p>
+    <p class="hint" id="sf-modal-ayuda" style="margin:0;">La sugerencia está preseleccionada. Revisá el nombre y el DNI antes de confirmar.</p>
     <label for="sf-modal-buscar" class="sr-only">Buscar paciente por nombre, apellido o DNI</label>
     <input type="search" id="sf-modal-buscar" placeholder="Buscar paciente…" autocomplete="off">
     <div class="sf-lista" id="sf-modal-lista" role="group" aria-label="Fichas de pacientes"></div>
@@ -956,7 +960,7 @@
       }
       return `<tr>
           <td>${escapeHtmlAdmin(p.nombre)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
-          <td>${p.sugerida ? `<button class="btn btn-outline" data-sf-asignar="${p.fila}" data-sf-ficha="${escapeHtmlAdmin(p.sugerida.id)}" data-sf-nombre-ficha="${escapeHtmlAdmin(p.sugerida.nombre)}">Es ${escapeHtmlAdmin(p.sugerida.nombre)}</button>` : ''}</td>
+          <td>${p.candidatas?.length ? `<div class="sf-candidatas"><span class="sf-candidatas-label">Posibles coincidencias</span>${p.candidatas.slice(0, 3).map((c) => `<button type="button" class="btn btn-outline sf-candidata" data-sf-candidato="${escapeHtmlAdmin(c.id)}" data-sf-motivo="${escapeHtmlAdmin(c.motivo)}" data-sf-nombre-ficha="${escapeHtmlAdmin(c.nombre)}"><span>${escapeHtmlAdmin(c.nombre)}</span><small>${escapeHtmlAdmin(c.motivo)}${c.dni ? ' · DNI ' + escapeHtmlAdmin(c.dni) : ' · Sin DNI en ficha'}</small></button>`).join('')}</div>` : ''}</td>
           <td><button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td></tr>`;
     }).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
   }
@@ -990,13 +994,13 @@
       </button>`).join('') || '<div class="sf-item">No hay fichas que coincidan con la búsqueda.</div>';
   }
   let modalReturnFocus = null;
-  async function abrirModalFicha(fila, nombre) {
+  async function abrirModalFicha(fila, nombre, sugerenciaId = '', motivo = '', nombreFicha = '') {
     modalReturnFocus = document.activeElement;
-    modalFila = fila; modalFichaId = ''; modalNombrePersona = nombre;
+    modalFila = fila; modalFichaId = sugerenciaId; modalNombrePersona = nombre;
     document.getElementById('sf-modal-titulo').textContent = `Elegir la ficha de ${nombre}`;
-    document.getElementById('sf-modal-buscar').value = '';
-    document.getElementById('sf-modal-asignar').disabled = true;
-    document.getElementById('sf-modal-msg').textContent = '';
+    document.getElementById('sf-modal-buscar').value = sugerenciaId ? nombreFicha : '';
+    document.getElementById('sf-modal-asignar').disabled = !sugerenciaId;
+    document.getElementById('sf-modal-msg').textContent = motivo ? `Sugerencia: ${motivo}. Revisá la ficha antes de confirmar.` : '';
     document.getElementById('sf-modal').classList.remove('hidden');
     pintarFichasModal();
     document.getElementById('sf-modal-buscar').focus();
@@ -1059,6 +1063,13 @@
   });
 
   document.querySelector('#sf-tabla').addEventListener('click', async (ev) => {
+    const candidata = ev.target.closest('[data-sf-candidato]');
+    if (candidata) {
+      const fila = Number(candidata.closest('tr').querySelector('[data-sf-elegir]')?.dataset.sfElegir);
+      const nombre = candidata.closest('tr').querySelector('[data-sf-elegir]')?.dataset.sfNombre || '';
+      abrirModalFicha(fila, nombre, candidata.dataset.sfCandidato, candidata.dataset.sfMotivo, candidata.dataset.sfNombreFicha);
+      return;
+    }
     const elegir = ev.target.closest('[data-sf-elegir]');
     if (elegir) { abrirModalFicha(Number(elegir.dataset.sfElegir), elegir.dataset.sfNombre); return; }
     const deshacer = ev.target.closest('[data-sf-deshacer]');

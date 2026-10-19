@@ -21,7 +21,7 @@ import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
   leerActividadReciente, leerAlertasRecientes,
 } from '../../lib/adminConfig.js';
-import { listarPacientesConsolidados, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre } from '../../lib/pacientesConsolidados.js';
+import { listarPacientesConsolidados, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre, desasignarFila } from '../../lib/pacientesConsolidados.js';
 import { normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
 import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
@@ -104,6 +104,7 @@ export default async function handler(req, res) {
       if (recurso === 'radios') return await postRadios(req, res);
       if (recurso === 'accesos') return await postAccesos(req, res);
       if (recurso === 'asignar-ficha') return await postAsignarFicha(req, res);
+      if (recurso === 'desasignar-ficha') return await postDesasignarFicha(req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
@@ -1114,6 +1115,13 @@ async function postAsignarFicha(req, res) {
   const r = await asignarFilaAFicha(req.body.fila, req.body.fichaId);
   if (!r.ok) return res.status(400).json({ success: false, error: r.error });
   await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${r.nombre} asignado a ficha ${req.body.fichaId}`, actor: 'admin' });
+  res.status(200).json({ success: true });
+}
+
+async function postDesasignarFicha(req, res) {
+  const r = await desasignarFila(req.body.fila);
+  if (!r.ok) return res.status(400).json({ success: false, error: r.error });
+  await logActividad({ tipo: 'desasignar_ficha', detalle: `Asignación cancelada: ${r.nombre}`, actor: 'admin' });
   res.status(200).json({ success: true });
 }
 

@@ -4,8 +4,8 @@ import {
   isValidGestionKey, toArgDate, formatArgDay,
 } from '../../lib/googleCalendar.js';
 import { buscarPacienteConsolidadoPorNombre, buscarPacienteConsolidadoPorDni, buscarPacienteConsolidadoPorTelefono, listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
-import { normalizarDni, rangoPrestacionesObraSocial } from '../../lib/pacientesSheet.js';
-import { getPacientesSheetsClient } from '../../lib/googleOAuthPacientes.js';
+import { normalizarDni, rangoPrestacionesObraSocial, PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, parsearNombreArchivo } from '../../lib/pacientesSheet.js';
+import { getPacientesSheetsClient, getPacientesDriveClient } from '../../lib/googleOAuthPacientes.js';
 import { esFeriado } from '../../lib/feriados.js';
 import { conReintentos } from '../../lib/retry.js';
 
@@ -326,7 +326,31 @@ async function tareas(req, res) {
     }
     const porDniFicha = new Map();
     const porNombreFicha = new Map();
-    for (const p of pacientes.filter((x) => x.fichaId)) {
+    const fichasIndexadas = new Map(pacientes.filter((x) => x.fichaId).map((p) => [p.fichaId, p]));
+    // La hoja central se actualiza best-effort cuando alguien carga/edita datos. Si
+    // alguna ficha quedó fuera de sincronía, Drive todavía permite cruzarla por su
+    // nombre y DNI del archivo, sin leer cientos de spreadsheets.
+    try {
+      const drive = getPacientesDriveClient();
+      const { data } = await conReintentos(() => drive.files.list({
+        q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
+        fields: 'files(id, name)', pageSize: 1000,
+      }));
+      for (const archivo of data.files || []) {
+        if (archivo.id === FICHA_TEMPLATE_ID || /^⭐/.test(archivo.name) || /\(no tocar\)\s*$/.test(archivo.name)) continue;
+        const datos = parsearNombreArchivo(archivo.name);
+        const actual = fichasIndexadas.get(archivo.id) || {};
+        fichasIndexadas.set(archivo.id, {
+          ...actual, fichaId: archivo.id,
+          nombre: actual.nombre || datos.nombre,
+          apellido: actual.apellido || datos.apellido,
+          dni: actual.dni || datos.dni,
+        });
+      }
+    } catch (err) {
+      console.warn('[buscar.js] no se pudo completar el cruce desde Drive:', err?.message || err);
+    }
+    for (const p of fichasIndexadas.values()) {
       const dni = normalizarDni(p.dni);
       if (dni) {
         if (!porDniFicha.has(dni)) porDniFicha.set(dni, new Map());

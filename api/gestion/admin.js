@@ -21,7 +21,7 @@ import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
   leerActividadReciente, leerAlertasRecientes,
 } from '../../lib/adminConfig.js';
-import { listarPacientesConsolidados, upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
+import { listarPacientesConsolidados, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre } from '../../lib/pacientesConsolidados.js';
 import { normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
 import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
@@ -1085,9 +1085,12 @@ async function calcularPacientesTotales() {
 // Son las filas de "Pacientes consolidados" sin fichaId. Se lee en vivo (sin snapshot).
 async function getSinFicha(req, res) {
   const filas = await listarPacientesConsolidados();
+  const sug = sugerenciasPorNombre(filas);
+  const nombreFicha = new Map(filas.filter((f) => f.fichaId).map((f) => [f.fichaId, `${f.nombre} ${f.apellido}`.trim()]));
   const sinFicha = filas
     .filter((f) => !f.fichaId)
     .map((f) => ({
+      sugerida: sug.has(f.fila) ? { id: sug.get(f.fila), nombre: nombreFicha.get(sug.get(f.fila)) } : null,
       fila: f.fila, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni, telefono: f.telefono,
       turnosPasados: f.turnosPasados || 0, ultimaVisita: f.ultimaVisita || '',
     }))
@@ -1097,26 +1100,20 @@ async function getSinFicha(req, res) {
     .filter((f) => f.fichaId && !vistos.has(f.fichaId) && vistos.add(f.fichaId))
     .map((f) => ({ id: f.fichaId, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-  res.status(200).json({ success: true, sinFicha, fichas });
+  res.status(200).json({ success: true, sinFicha, fichas: [] });
 }
 
-// Asigna a mano una persona de turnos a una ficha existente: la fila queda con ese
-// fichaId (el teléfono/DNI de la persona sigue apuntando a la ficha en el futuro).
+// Asigna a mano una persona de turnos a una ficha existente (o, con lote:true, todas las
+// coincidencias exactas por nombre, de a 25 por llamada).
 async function postAsignarFicha(req, res) {
-  const { fila, fichaId } = req.body;
-  const filas = await listarPacientesConsolidados();
-  const persona = filas.find((f) => f.fila === Number(fila));
-  if (!persona || persona.fichaId) return res.status(400).json({ success: false, error: 'Esa persona ya no está sin ficha. Recargá la lista.' });
-  if (!filas.some((f) => f.fichaId === fichaId)) return res.status(400).json({ success: false, error: 'La ficha elegida no existe.' });
-  if (!persona.telefono && !persona.dni) return res.status(400).json({ success: false, error: 'Sin teléfono ni DNI no se puede vincular.' });
-  const dniPersona = String(persona.dni || '').replace(/\D/g, '');
-  const choca = dniPersona && filas.find((f) => f.fila !== persona.fila && f.fichaId && f.fichaId !== fichaId && String(f.dni || '').replace(/\D/g, '') === dniPersona);
-  if (choca) return res.status(400).json({ success: false, error: 'El DNI de esta persona ya pertenece a otra ficha.' });
-  await upsertPacienteConsolidado({
-    telefono: persona.telefono, nombre: persona.nombre, apellido: persona.apellido,
-    dni: persona.dni, fichaId, origen: 'ficha', email: persona.email,
-  });
-  await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${persona.nombre} ${persona.apellido} asignado a ficha ${fichaId}`, actor: 'admin' });
+  if (req.body.lote) {
+    const r = await asignarCoincidenciasExactas(25);
+    await logActividad({ tipo: 'asignar_ficha', detalle: `Asignación por nombre exacto: ${r.asignadas} personas`, actor: 'admin' });
+    return res.status(200).json({ success: true, ...r });
+  }
+  const r = await asignarFilaAFicha(req.body.fila, req.body.fichaId);
+  if (!r.ok) return res.status(400).json({ success: false, error: r.error });
+  await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${r.nombre} asignado a ficha ${req.body.fichaId}`, actor: 'admin' });
   res.status(200).json({ success: true });
 }
 

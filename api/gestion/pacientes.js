@@ -31,7 +31,7 @@ import { conReintentos } from '../../lib/retry.js';
 import { isValidAdminKey } from '../../lib/adminAuth.js';
 import { Readable } from 'node:stream';
 import crypto from 'node:crypto';
-import { upsertPacienteConsolidado, actualizarPacienteConsolidado, listarPacientesConsolidados, PACIENTES_CONSOLIDADOS_NAME } from '../../lib/pacientesConsolidados.js';
+import { upsertPacienteConsolidado, actualizarPacienteConsolidado, listarPacientesConsolidados, asignarFilaAFicha, PACIENTES_CONSOLIDADOS_NAME } from '../../lib/pacientesConsolidados.js';
 // Confirmación automática de turnos por movimientos (pedido 2026-08-25, ver
 // lib/confirmarTurnosPorMovimiento.js): al guardar/editar un movimiento con fecha, si ese
 // paciente tiene un turno ese día, queda "Confirmado: Sí". Best-effort, nunca rompe el
@@ -183,6 +183,10 @@ export default async function handler(req, res) {
       if (req.body.accion === 'fusionar') return await fusionarPacientes(req, res);
       if (req.body.accion === 'completar-telefono-turno') return await completarTelefonoTurno(req, res);
       if (req.body.accion === 'confirmar-match') return await confirmarMatch(req, res);
+      if (req.body.accion === 'asignar-turno-a-ficha') {
+        const r = await asignarFilaAFicha(req.body.fila, req.body.fichaId);
+        return res.status(r.ok ? 200 : 400).json({ success: r.ok, message: r.error, nombre: r.nombre });
+      }
       if (req.body.accion === 'movimiento-agregar') return await movimientoAgregar(req, res);
       if (req.body.accion === 'movimiento-editar') return await movimientoEditar(req, res);
       if (req.body.accion === 'movimiento-anular') return await movimientoAnular(req, res);

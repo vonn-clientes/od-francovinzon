@@ -21,7 +21,7 @@ import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
   leerActividadReciente, leerAlertasRecientes,
 } from '../../lib/adminConfig.js';
-import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
+import { listarPacientesConsolidados, upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 import { normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
 import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
@@ -92,6 +92,7 @@ export default async function handler(req, res) {
       if (recurso === 'export-perfil-anonimo') return await conError(exportPerfilPacientes, req, res);
       if (recurso === 'export-pacientes-completo') return await conError(exportPacientesCompleto, req, res);
       if (recurso === 'export-audiencia') return await conError(exportAudiencia, req, res);
+      if (recurso === 'sin-ficha') return await conError(getSinFicha, req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
@@ -102,6 +103,7 @@ export default async function handler(req, res) {
       if (recurso === 'listas') return await postListas(req, res);
       if (recurso === 'radios') return await postRadios(req, res);
       if (recurso === 'accesos') return await postAccesos(req, res);
+      if (recurso === 'asignar-ficha') return await postAsignarFicha(req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
@@ -1060,8 +1062,11 @@ async function calcularPacientesTotales() {
     return { total: null, totalFichas: null, totalSoloTurno: null, fichas: [], soloTurno: [] };
   }
 
+  // Un mismo fichaId puede estar en 2 filas (la de la ficha y la de un teléfono de turno
+  // asignado a mano): se cuenta una sola vez.
+  const vistosFicha = new Set();
   const fichas = filas
-    .filter((f) => f.fichaId)
+    .filter((f) => f.fichaId && !vistosFicha.has(f.fichaId) && vistosFicha.add(f.fichaId))
     .map((f) => ({ id: f.fichaId, nombre: f.nombre, apellido: f.apellido, dni: f.dni, telefono: f.telefono }));
   const soloTurno = filas
     .filter((f) => !f.fichaId)
@@ -1074,6 +1079,45 @@ async function calcularPacientesTotales() {
     fichas,
     soloTurno: soloTurno.slice(0, 500),
   };
+}
+
+// ---------- Pacientes con turnos pero sin ficha ----------
+// Son las filas de "Pacientes consolidados" sin fichaId. Se lee en vivo (sin snapshot).
+async function getSinFicha(req, res) {
+  const filas = await listarPacientesConsolidados();
+  const sinFicha = filas
+    .filter((f) => !f.fichaId)
+    .map((f) => ({
+      fila: f.fila, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni, telefono: f.telefono,
+      turnosPasados: f.turnosPasados || 0, ultimaVisita: f.ultimaVisita || '',
+    }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const vistos = new Set();
+  const fichas = filas
+    .filter((f) => f.fichaId && !vistos.has(f.fichaId) && vistos.add(f.fichaId))
+    .map((f) => ({ id: f.fichaId, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  res.status(200).json({ success: true, sinFicha, fichas });
+}
+
+// Asigna a mano una persona de turnos a una ficha existente: la fila queda con ese
+// fichaId (el teléfono/DNI de la persona sigue apuntando a la ficha en el futuro).
+async function postAsignarFicha(req, res) {
+  const { fila, fichaId } = req.body;
+  const filas = await listarPacientesConsolidados();
+  const persona = filas.find((f) => f.fila === Number(fila));
+  if (!persona || persona.fichaId) return res.status(400).json({ success: false, error: 'Esa persona ya no está sin ficha. Recargá la lista.' });
+  if (!filas.some((f) => f.fichaId === fichaId)) return res.status(400).json({ success: false, error: 'La ficha elegida no existe.' });
+  if (!persona.telefono && !persona.dni) return res.status(400).json({ success: false, error: 'Sin teléfono ni DNI no se puede vincular.' });
+  const dniPersona = String(persona.dni || '').replace(/\D/g, '');
+  const choca = dniPersona && filas.find((f) => f.fila !== persona.fila && f.fichaId && f.fichaId !== fichaId && String(f.dni || '').replace(/\D/g, '') === dniPersona);
+  if (choca) return res.status(400).json({ success: false, error: 'El DNI de esta persona ya pertenece a otra ficha.' });
+  await upsertPacienteConsolidado({
+    telefono: persona.telefono, nombre: persona.nombre, apellido: persona.apellido,
+    dni: persona.dni, fichaId, origen: 'ficha', email: persona.email,
+  });
+  await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${persona.nombre} ${persona.apellido} asignado a ficha ${fichaId}`, actor: 'admin' });
+  res.status(200).json({ success: true });
 }
 
 async function getMetricasAvanzadas(req, res) {

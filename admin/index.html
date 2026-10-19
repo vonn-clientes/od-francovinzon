@@ -242,6 +242,13 @@
           </div>
         </div>
 
+        <div class="card" id="card-sin-ficha">
+          <h2>Pacientes sin ficha asignada</h2>
+          <p class="hint">Personas que sacaron turno pero no están vinculadas a ninguna ficha. Elegí la ficha y tocá Asignar.</p>
+          <div id="sf-msg" class="msg"></div>
+          <div class="table-wrap"><table id="sf-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Ficha</th><th></th></tr></thead><tbody></tbody></table></div>
+        </div>
+
         <div class="card" id="card-publico">
           <h2>Público objetivo (buyer persona)</h2>
           <p class="hint">Se calcula con todas las fichas, los turnos de los últimos 12 meses y el historial de visitas. Es anónimo: solo totales y porcentajes, sin nombres ni datos de contacto. <span id="pub-generado"></span> <button class="btn btn-outline" id="pub-refrescar" style="padding:5px 12px;font-size:11.5px;">Actualizar</button></p>
@@ -561,7 +568,7 @@
     if (SECCIONES_CARGADAS.has(sec)) return;
     SECCIONES_CARGADAS.add(sec);
     const loaders = {
-      dashboard: () => { cargarDashboard(); cargarDashboardAvanzado(); cargarPublico(); },
+      dashboard: () => { cargarDashboard(); cargarDashboardAvanzado(); cargarPublico(); cargarSinFicha(); },
       'reserva-online': cargarReservaOnline,
       horarios: cargarHorarios, textos: cargarTextos,
       listas: cargarListas, radios: cargarRadios, pacientes: () => {},
@@ -892,6 +899,46 @@
   }
   document.getElementById('dash-pacientes-toggle').addEventListener('click', () => {
     document.getElementById('dash-pacientes-wrap').classList.toggle('hidden');
+  });
+
+  // ---------- Pacientes sin ficha asignada ----------
+  let sinFichaDatos = null;
+  async function cargarSinFicha() {
+    const tbody = document.querySelector('#sf-tabla tbody');
+    tbody.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
+    try {
+      const r = await apiGet('sin-ficha');
+      if (!r.success) throw new Error('x');
+      sinFichaDatos = r;
+      const opciones = '<option value="">Elegir ficha…</option>' + r.fichas.map((f) =>
+        `<option value="${escapeHtmlAdmin(f.id)}">${escapeHtmlAdmin(f.nombre)}${f.dni ? ' · ' + escapeHtmlAdmin(f.dni) : ''}</option>`).join('');
+      tbody.innerHTML = r.sinFicha.map((p) => `
+        <tr>
+          <td>${escapeHtmlAdmin(p.nombre)}</td>
+          <td>${escapeHtmlAdmin(p.dni || '')}</td>
+          <td>${escapeHtmlAdmin(p.telefono || '')}</td>
+          <td><select data-sf-sel="${p.fila}">${opciones}</select></td>
+          <td><button class="btn btn-outline" data-sf-asignar="${p.fila}">Asignar</button></td>
+        </tr>`).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
+    } catch (e) {
+      if (e.message !== 'unauthorized') tbody.innerHTML = '<tr><td colspan="5">No se pudo cargar.</td></tr>';
+    }
+  }
+  document.querySelector('#sf-tabla').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('[data-sf-asignar]');
+    if (!btn) return;
+    const fila = Number(btn.dataset.sfAsignar);
+    const fichaId = document.querySelector(`[data-sf-sel="${fila}"]`).value;
+    if (!fichaId) { setMsg('sf-msg', 'Elegí una ficha primero.', 'error'); return; }
+    btn.disabled = true;
+    setMsg('sf-msg', '', '');
+    try {
+      const r = await apiPost('asignar-ficha', { fila, fichaId });
+      if (r.success) { setMsg('sf-msg', 'Asignada.', 'ok'); await cargarSinFicha(); }
+      else { setMsg('sf-msg', r.error || 'No se pudo asignar.', 'error'); btn.disabled = false; }
+    } catch (e) {
+      if (e.message !== 'unauthorized') { setMsg('sf-msg', 'Error de red. Probá de nuevo.', 'error'); btn.disabled = false; }
+    }
   });
 
   // ---------- Reserva online ----------

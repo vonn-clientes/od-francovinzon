@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-19 — Selector de fichas y autocompletado de turnos
+
+- Corregido el orden del modal “Elegir ficha” en `/admin`: sus controles ahora existen antes de registrar eventos, así que el selector abre; fichas seleccionables por teclado, cierre con Escape y foco devuelto al botón que lo abrió.
+- El listado de fichas valida la respuesta del servidor y permite reintentar si falla la carga.
+- Al vincular una persona con una ficha, el vínculo del registro central queda disponible para autocompletar datos en próximos turnos.
+- En `/gestion`, el autocompletado ahora ofrece completar DNI aunque el teléfono ya esté cargado (y viceversa), y solo rellena campos vacíos tras confirmación.
+
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
 
 ## 2026-10-19 — Ficha de paciente más simple y guardado más confiable

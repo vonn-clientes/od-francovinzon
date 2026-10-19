@@ -145,7 +145,8 @@
   .sf-box h3 { margin: 0 0 4px; font-size: 18px; }
   .sf-box input[type=search] { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1.5px solid #E8E4D8; margin: 10px 0; font-size: 15px; box-sizing: border-box; }
   .sf-lista { overflow-y: auto; flex: 1; min-height: 160px; border: 1px solid #EFEBE0; border-radius: 12px; }
-  .sf-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #F3F0E6; }
+  .sf-item { display: block; width: 100%; padding: 10px 14px; cursor: pointer; border: 0; border-bottom: 1px solid #F3F0E6; background: var(--white); color: var(--text); text-align: left; font: inherit; }
+  .sf-item:hover, .sf-item:focus-visible { background: #FAF9F6; outline: 2px solid #D4A24C; outline-offset: -2px; }
   .sf-item:last-child { border-bottom: none; }
   .sf-item small { display: block; color: #7a7566; }
   .sf-item.sel { background: #FBF3E0; outline: 2px solid #D4A24C; outline-offset: -2px; }
@@ -469,6 +470,22 @@
     </div>
   </div>
 </div>
+
+<div class="sf-modal hidden" id="sf-modal" role="dialog" aria-modal="true" aria-labelledby="sf-modal-titulo" aria-describedby="sf-modal-ayuda">
+  <div class="sf-box">
+    <h3 id="sf-modal-titulo">Elegir ficha</h3>
+    <p class="hint" id="sf-modal-ayuda" style="margin:0;">Buscá por nombre, apellido o DNI y elegí la ficha correcta.</p>
+    <label for="sf-modal-buscar" class="sr-only">Buscar paciente por nombre, apellido o DNI</label>
+    <input type="search" id="sf-modal-buscar" placeholder="Buscar paciente…" autocomplete="off">
+    <div class="sf-lista" id="sf-modal-lista" role="group" aria-label="Fichas de pacientes"></div>
+    <div id="sf-modal-msg" class="msg" role="status" aria-live="polite"></div>
+    <div class="sf-acciones">
+      <button class="btn btn-outline" id="sf-modal-cancelar">Cancelar</button>
+      <button class="btn btn-primary" id="sf-modal-asignar" disabled>Asignar ficha</button>
+    </div>
+  </div>
+</div>
+<style>.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }</style>
 
 <script>
   let adminKey = sessionStorage.getItem('adminKey') || '';
@@ -919,6 +936,7 @@
   let sinFichaLista = [];       // filas sin ficha, tal cual vienen del servidor
   const asignadasAhora = new Map(); // fila -> { id, nombre } (se ven un rato, con "Cancelar asignación")
   let fichasTodas = null;       // fichas de /pacientes (para el pop-up)
+  let fichasError = false;
   let modalFila = 0, modalFichaId = '', modalNombrePersona = '';
 
   function renderSinFicha() {
@@ -961,14 +979,19 @@
   function pintarFichasModal() {
     const q = normSf(document.getElementById('sf-modal-buscar').value.trim());
     const lista = document.getElementById('sf-modal-lista');
-    if (!fichasTodas) { lista.innerHTML = '<div class="sf-item">Cargando fichas…</div>'; return; }
+    if (!fichasTodas) {
+      lista.innerHTML = `<div class="sf-item">${fichasError ? 'No se pudieron cargar las fichas. Cerrá y volvé a abrir el selector para reintentar.' : 'Cargando fichas…'}</div>`;
+      return;
+    }
     const filtradas = (q ? fichasTodas.filter((f) => normSf(`${f.nombre} ${f.apellido} ${f.dni}`).includes(q)) : fichasTodas).slice(0, 80);
     lista.innerHTML = filtradas.map((f) => `
-      <div class="sf-item ${f.id === modalFichaId ? 'sel' : ''}" data-id="${escapeHtmlAdmin(f.id)}">
+      <button type="button" class="sf-item ${f.id === modalFichaId ? 'sel' : ''}" aria-pressed="${f.id === modalFichaId}" data-id="${escapeHtmlAdmin(f.id)}">
         ${escapeHtmlAdmin(`${f.nombre} ${f.apellido}`.trim())}<small>${f.dni ? 'DNI ' + escapeHtmlAdmin(f.dni) : 'Sin DNI'}</small>
-      </div>`).join('') || '<div class="sf-item">Sin resultados.</div>';
+      </button>`).join('') || '<div class="sf-item">No hay fichas que coincidan con la búsqueda.</div>';
   }
+  let modalReturnFocus = null;
   async function abrirModalFicha(fila, nombre) {
+    modalReturnFocus = document.activeElement;
     modalFila = fila; modalFichaId = ''; modalNombrePersona = nombre;
     document.getElementById('sf-modal-titulo').textContent = `Elegir la ficha de ${nombre}`;
     document.getElementById('sf-modal-buscar').value = '';
@@ -978,24 +1001,41 @@
     pintarFichasModal();
     document.getElementById('sf-modal-buscar').focus();
     if (!fichasTodas) {
+      fichasError = false;
       try {
         const r = await fetch(`/api/gestion/pacientes?modo=listar&key=${encodeURIComponent(adminKey)}`);
-        fichasTodas = await r.json();
-      } catch (e) { fichasTodas = []; setMsg('sf-modal-msg', 'No se pudieron cargar las fichas.', 'error'); }
-      pintarFichasModal();
+        if (!r.ok) throw new Error('No se pudo consultar el listado.');
+        const datos = await r.json();
+        if (!Array.isArray(datos)) throw new Error('La respuesta de fichas no es válida.');
+        fichasTodas = datos;
+        pintarFichasModal();
+      } catch (e) {
+        fichasTodas = null;
+        fichasError = true;
+        document.getElementById('sf-modal-lista').innerHTML = '<div class="sf-item">No se pudieron cargar las fichas.</div>';
+        setMsg('sf-modal-msg', 'Revisá tu conexión e intentá abrir el selector otra vez.', 'error');
+      }
     }
   }
-  function cerrarModalFicha() { document.getElementById('sf-modal').classList.add('hidden'); }
+  function cerrarModalFicha() {
+    document.getElementById('sf-modal').classList.add('hidden');
+    if (modalReturnFocus && typeof modalReturnFocus.focus === 'function') modalReturnFocus.focus();
+  }
   document.getElementById('sf-modal-buscar').addEventListener('input', pintarFichasModal);
   document.getElementById('sf-modal-lista').addEventListener('click', (ev) => {
-    const it = ev.target.closest('.sf-item[data-id]');
+    const it = ev.target.closest('button.sf-item[data-id]');
     if (!it) return;
     modalFichaId = it.dataset.id;
     document.getElementById('sf-modal-asignar').disabled = false;
-    pintarFichasModal();
+    document.querySelectorAll('#sf-modal-lista .sf-item[data-id]').forEach((opcion) => {
+      const seleccionado = opcion.dataset.id === modalFichaId;
+      opcion.classList.toggle('sel', seleccionado);
+      opcion.setAttribute('aria-pressed', String(seleccionado));
+    });
   });
   document.getElementById('sf-modal-cancelar').addEventListener('click', cerrarModalFicha);
   document.getElementById('sf-modal').addEventListener('click', (ev) => { if (ev.target.id === 'sf-modal') cerrarModalFicha(); });
+  document.getElementById('sf-modal').addEventListener('keydown', (ev) => { if (ev.key === 'Escape') cerrarModalFicha(); });
   document.getElementById('sf-modal-asignar').addEventListener('click', async () => {
     const btn = document.getElementById('sf-modal-asignar');
     const ficha = (fichasTodas || []).find((f) => f.id === modalFichaId);
@@ -1458,19 +1498,6 @@
 </script>
 <script defer src="/_vercel/insights/script.js"></script>
 
-<div class="sf-modal hidden" id="sf-modal" role="dialog" aria-modal="true">
-  <div class="sf-box">
-    <h3 id="sf-modal-titulo">Elegir ficha</h3>
-    <p class="hint" style="margin:0;">Buscá por nombre, apellido o DNI y tocá la ficha.</p>
-    <input type="search" id="sf-modal-buscar" placeholder="Buscar paciente…" autocomplete="off">
-    <div class="sf-lista" id="sf-modal-lista"></div>
-    <div id="sf-modal-msg" class="msg"></div>
-    <div class="sf-acciones">
-      <button class="btn btn-outline" id="sf-modal-cancelar">Cancelar</button>
-      <button class="btn btn-primary" id="sf-modal-asignar" disabled>Asignar</button>
-    </div>
-  </div>
-</div>
 <script>
   window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
 </script>

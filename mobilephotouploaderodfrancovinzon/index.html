@@ -112,7 +112,7 @@
   </div>
 
   <div class="card" id="card-buscar">
-    <div class="search-box"><input type="text" id="buscar-input" placeholder="Buscar paciente por nombre o DNI..." autocomplete="off"></div>
+    <div class="search-box"><input type="text" id="buscar-input" placeholder="Buscar paciente por nombre o DNI..." aria-label="Buscar paciente por nombre o DNI" autocomplete="off"></div>
     <div class="hint">Escribí al menos 2 caracteres.</div>
     <div id="resultados"></div>
     <div id="hoy-wrap" class="hidden">
@@ -136,7 +136,7 @@
 
     <div class="field">
       <label>Descripción</label>
-      <textarea id="foto-descripcion" placeholder="Ej: Radiografía panorámica, control de ortodoncia..."></textarea>
+      <textarea id="foto-descripcion" placeholder="Ej: Radiografía panorámica, control de ortodoncia..." aria-label="Descripción de la foto (opcional)"></textarea>
     </div>
     <button class="btn-subir" id="btn-subir" disabled>Subir foto</button>
     <div class="msg" id="upload-msg"></div>

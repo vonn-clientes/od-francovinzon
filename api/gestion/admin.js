@@ -93,7 +93,6 @@ export default async function handler(req, res) {
       if (recurso === 'export-turnos') return await conError(exportTurnos, req, res);
       if (recurso === 'export-perfil-anonimo') return await conError(exportPerfilPacientes, req, res);
       if (recurso === 'export-pacientes-completo') return await conError(exportPacientesCompleto, req, res);
-      if (recurso === 'export-audiencia') return await conError(exportAudiencia, req, res);
       if (recurso === 'sin-ficha') return await conError(getSinFicha, req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
@@ -1263,56 +1262,6 @@ async function exportPacientesCsv(req, res) {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="pacientes.csv"');
   res.status(200).send('﻿' + csv);
-}
-
-// ---------- Audiencias para Meta Ads y Google Ads (listas de clientes / Customer Match) ----------
-// Solo datos de contacto (email, teléfono, nombre, apellido, país) — NUNCA tratamientos,
-// saldos, obra social ni nada de la historia clínica. Salen en texto plano: Meta y Google
-// los normalizan y los hashean (SHA-256) ellos mismos al subir el CSV desde su web.
-// Formatos oficiales (verificados 2026-10-18):
-//   Google Ads (Customer Match): columnas Email, Phone, First Name, Last Name, Country.
-//     Teléfono en E.164 con país (el "+" es opcional en texto plano), país ISO de 2 letras.
-//   Meta (lista de clientes): columnas email, phone, fn, ln, country (ISO 2 letras).
-//     El teléfono lleva código de país.
-// Teléfonos argentinos: los guardamos como los últimos 10 dígitos (área + número, sin 0 ni 15);
-// el formato E.164 de un celular argentino es +54 9 + esos 10 dígitos.
-function telefonoE164Argentina(tel) {
-  const d = normalizarTelefonoMapeo(tel);
-  return d.length === 10 ? `+549${d}` : '';
-}
-
-async function exportAudiencia(req, res) {
-  const plataforma = req.query.plataforma === 'google' ? 'google' : 'meta';
-  const filas = await listarPacientesConsolidados();
-  const encabezado = plataforma === 'google'
-    ? ['Email', 'Phone', 'First Name', 'Last Name', 'Country']
-    : ['email', 'phone', 'fn', 'ln', 'country'];
-  const emailValido = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-  const vistos = new Set();
-  const salida = [];
-  let sinContacto = 0;
-  for (const f of filas) {
-    const email = String(f.email || '').trim().toLowerCase();
-    const mail = emailValido(email) ? email : '';
-    const phone = telefonoE164Argentina(f.telefono);
-    if (!mail && !phone) { sinContacto++; continue; }
-    const clave = mail || phone;
-    if (vistos.has(clave)) continue; // la misma persona dos veces no suma
-    vistos.add(clave);
-    salida.push([
-      mail, phone,
-      String(f.nombre || '').trim().toLowerCase(),
-      String(f.apellido || '').trim().toLowerCase(),
-      'AR',
-    ]);
-  }
-  const csv = [encabezado, ...salida].map((fila) => fila.map(csvEscape).join(',')).join('\n');
-  const hoy = formatArgDay(new Date());
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="audiencia_${plataforma}_ads_${hoy}.csv"`);
-  res.setHeader('X-Contactos', String(salida.length));
-  res.setHeader('X-Sin-Contacto', String(sinContacto));
-  res.status(200).send(csv);
 }
 
 function csvEscape(v) {

@@ -165,7 +165,7 @@
     <img src="../assets/isologo.png" alt="">
     <h1>Panel administrativo</h1>
     <p>Acceso solo para Fausto — clave propia, distinta de la de gestión.</p>
-    <input type="password" id="key-input" placeholder="Clave de administrador" autocomplete="off">
+    <input type="password" id="key-input" placeholder="Clave de administrador" aria-label="Clave de administrador" autocomplete="off">
     <button id="login-btn">Entrar</button>
     <div class="login-error" id="login-error"></div>
   </div>
@@ -305,8 +305,8 @@
           <p class="hint">Rangos "HH:mm-HH:mm" separados por coma para días con más de un turno (ej. martes mañana y tarde). Dejar vacío = cerrado ese día.</p>
           <div id="horarios-dias"></div>
           <div class="field-row">
-            <div class="field"><label>Duración de turno (min)</label><input type="number" id="h-slot" min="5" step="5"></div>
-            <div class="field"><label>Duración de sobreturno (min)</label><input type="number" id="h-sobreturno" min="5" step="5"></div>
+            <div class="field"><label for="h-slot">Duración de turno (min)</label><input type="number" id="h-slot" min="5" step="5"></div>
+            <div class="field"><label for="h-sobreturno">Duración de sobreturno (min)</label><input type="number" id="h-sobreturno" min="5" step="5"></div>
           </div>
           <button class="btn btn-primary" id="h-guardar">Guardar horarios</button>
           <div class="msg" id="h-msg"></div>
@@ -314,12 +314,12 @@
         <div class="card">
           <h2>Feriados / días y horarios bloqueados</h2>
           <div class="field-row">
-            <div class="field"><label>Fecha</label><input type="date" id="b-fecha"></div>
-            <div class="field"><label>Motivo (opcional)</label><input type="text" id="b-motivo"></div>
+            <div class="field"><label for="b-fecha">Fecha</label><input type="date" id="b-fecha"></div>
+            <div class="field"><label for="b-motivo">Motivo (opcional)</label><input type="text" id="b-motivo"></div>
           </div>
           <div class="field-row">
-            <div class="field"><label>Desde (vacío = día completo)</label><input type="time" id="b-desde"></div>
-            <div class="field"><label>Hasta</label><input type="time" id="b-hasta"></div>
+            <div class="field"><label for="b-desde">Desde (vacío = día completo)</label><input type="time" id="b-desde"></div>
+            <div class="field"><label for="b-hasta">Hasta</label><input type="time" id="b-hasta"></div>
           </div>
           <button class="btn btn-gold" id="b-bloquear">Bloquear</button>
           <div class="msg" id="b-msg"></div>
@@ -332,13 +332,14 @@
         <div class="card">
           <h2>Plantilla del mensaje de WhatsApp (recordatorio, /gestion)</h2>
           <p class="hint">Placeholders disponibles: {{saludo}} {{nombre}} {{cuando}} {{hora}} {{tipo}}</p>
+          <label for="t-whatsapp">Mensaje del recordatorio</label>
           <div class="field full"><textarea id="t-whatsapp" style="min-height:140px;"></textarea></div>
           <h2 style="margin-top:18px;">Textos fijos de /turnos</h2>
           <div class="field-row">
-            <div class="field full"><label>Dirección del consultorio</label><input type="text" id="t-direccion"></div>
+            <div class="field full"><label for="t-direccion">Dirección del consultorio</label><input type="text" id="t-direccion"></div>
           </div>
           <div class="field-row">
-            <div class="field full"><label>Bienvenida a paciente nuevo</label><input type="text" id="t-bienvenida"></div>
+            <div class="field full"><label for="t-bienvenida">Bienvenida a paciente nuevo</label><input type="text" id="t-bienvenida"></div>
           </div>
           <button class="btn btn-primary" id="t-guardar">Guardar textos</button>
           <div class="msg" id="t-msg"></div>
@@ -394,8 +395,8 @@
           <div class="msg" id="p-completo-msg"></div>
           <h3 style="font-size:14px;margin:16px 0 8px;">Turnos por rango de fechas</h3>
           <div class="field-row">
-            <div class="field"><label>Desde</label><input type="date" id="p-turnos-desde"></div>
-            <div class="field"><label>Hasta</label><input type="date" id="p-turnos-hasta"></div>
+            <div class="field"><label for="p-turnos-desde">Desde</label><input type="date" id="p-turnos-desde"></div>
+            <div class="field"><label for="p-turnos-hasta">Hasta</label><input type="date" id="p-turnos-hasta"></div>
           </div>
           <div class="row-actions">
             <button class="btn btn-outline" id="p-export-turnos-csv">Exportar turnos (CSV)</button>
@@ -404,7 +405,7 @@
           <h3 style="font-size:14px;margin:16px 0 8px;">Perfil anónimo de pacientes</h3>
           <p class="hint">Solo totales y porcentajes (edad, localidad, obra social, tratamientos, días y horarios, visitas). No incluye nombres, DNI, teléfonos ni domicilios. Tarda 1–3 minutos porque recorre todas las fichas.</p>
           <div class="field-row">
-            <div class="field"><label>Turnos a analizar</label>
+            <div class="field"><label for="p-perfil-meses">Turnos a analizar</label>
               <select id="p-perfil-meses">
                 <option value="6">Últimos 6 meses</option>
                 <option value="12" selected>Últimos 12 meses</option>
@@ -417,13 +418,7 @@
             <button class="btn btn-outline" id="p-export-perfil">Exportar perfil anónimo (CSV)</button>
           </div>
           <div class="msg" id="p-perfil-msg"></div>
-          <h3 style="font-size:14px;margin:16px 0 8px;">Audiencias para Meta Ads y Google Ads</h3>
-          <p class="hint">Lista de contactos (email, teléfono, nombre y apellido) lista para subir como audiencia personalizada de Meta o como Customer Match de Google Ads. No incluye tratamientos, saldos ni datos de salud. Meta y Google piden al menos unos cientos de contactos para que la audiencia sirva. Se descarga como CSV (se abre en Excel).</p>
-          <div class="row-actions">
-            <button class="btn btn-outline" id="p-export-meta">Descargar para Meta Ads (CSV)</button>
-            <button class="btn btn-outline" id="p-export-google">Descargar para Google Ads (CSV)</button>
-          </div>
-          <div class="msg" id="p-audiencia-msg"></div>
+          <p class="hint" style="margin-top:16px;">No se exportan contactos de pacientes para publicidad. Una lista de pacientes puede revelar una relación con servicios de salud, aunque no incluya tratamientos ni saldos.</p>
         </div>
       </div>
 
@@ -432,7 +427,7 @@
         <div class="card">
           <h2>Cambiar clave de /gestion</h2>
           <p class="hint">Requiere haber configurado VERCEL_API_TOKEN en Vercel (una sola vez). Puede tardar unos minutos en aplicarse.</p>
-          <div class="field"><label>Nueva clave (mín. 6 caracteres)</label><input type="text" id="a-nueva-clave"></div>
+          <div class="field"><label for="a-nueva-clave">Nueva clave (mín. 6 caracteres)</label><input type="text" id="a-nueva-clave"></div>
           <button class="btn btn-danger" id="a-cambiar">Cambiar clave</button>
           <div class="msg" id="a-msg"></div>
         </div>
@@ -1479,12 +1474,6 @@
   });
   document.getElementById('p-export-completo-md').addEventListener('click', (e) => {
     descargarExport(`/api/gestion/admin?recurso=export-pacientes-completo&formato=md&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-completo-msg', 'pacientes.md');
-  });
-  document.getElementById('p-export-meta').addEventListener('click', (e) => {
-    descargarExport(`/api/gestion/admin?recurso=export-audiencia&plataforma=meta&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-audiencia-msg', 'audiencia_meta_ads.csv');
-  });
-  document.getElementById('p-export-google').addEventListener('click', (e) => {
-    descargarExport(`/api/gestion/admin?recurso=export-audiencia&plataforma=google&key=${encodeURIComponent(adminKey)}`, e.currentTarget, 'p-audiencia-msg', 'audiencia_google_ads.csv');
   });
   document.getElementById('p-export-turnos-csv').addEventListener('click', () => {
     const desde = document.getElementById('p-turnos-desde').value;

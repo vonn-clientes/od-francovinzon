@@ -485,7 +485,7 @@
   <div class="login-box">
     <img src="../assets/isologo.png" alt="">
     <h1>Panel de gestión</h1>
-    <input type="password" id="key-input" placeholder="Clave de acceso" autocomplete="off">
+    <input type="password" id="key-input" placeholder="Clave de acceso" aria-label="Clave de acceso" autocomplete="off">
     <button id="login-btn">Entrar</button>
     <div class="login-error" id="login-error"></div>
   </div>
@@ -501,7 +501,7 @@
     <a href="/pacientes" class="copy-link-btn" style="display:block; text-align:center; text-decoration:none; margin-bottom: 14px;">📋 Acceder a fichas</a>
 
     <div class="sidebar-search">
-      <input type="text" id="search-input" placeholder="Buscar paciente...">
+      <input type="text" id="search-input" placeholder="Buscar paciente..." aria-label="Buscar paciente en la agenda">
     </div>
 
     <div class="sidebar-summary" id="sidebar-summary">
@@ -591,13 +591,13 @@
   </div>
 
   <div class="search-mobile">
-    <input type="text" id="search-input-mobile" placeholder="Buscar paciente...">
+    <input type="text" id="search-input-mobile" placeholder="Buscar paciente..." aria-label="Buscar paciente en la agenda">
   </div>
 
   <div class="datebar">
-    <button class="nav-btn" id="prev-day">‹</button>
-    <input type="date" id="date-input">
-    <button class="nav-btn" id="next-day">›</button>
+    <button class="nav-btn" id="prev-day" aria-label="Día anterior">‹</button>
+    <input type="date" id="date-input" aria-label="Fecha de la agenda">
+    <button class="nav-btn" id="next-day" aria-label="Día siguiente">›</button>
     <button class="today-btn" id="today-btn">Hoy</button>
   </div>
 
@@ -622,9 +622,9 @@
   <div id="panel-turno-calendario" class="panel hidden">
     <h2 id="mc-title">Nuevo turno</h2>
     <div class="mc-header">
-      <button class="nav-btn" id="mc-prev">‹</button>
+      <button class="nav-btn" id="mc-prev" aria-label="Mes anterior">‹</button>
       <div class="mc-month-label" id="mc-month-label"></div>
-      <button class="nav-btn" id="mc-next">›</button>
+      <button class="nav-btn" id="mc-next" aria-label="Mes siguiente">›</button>
     </div>
     <div class="mc-weekdays"><span>D</span><span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span></div>
     <div id="mc-days"></div>
@@ -750,7 +750,7 @@
 
   <div id="pacientes-view" class="hidden">
     <div class="paci-busqueda">
-      <input type="text" id="paci-busqueda-input" placeholder="Buscar paciente por nombre, DNI, teléfono o email..." autocomplete="off">
+      <input type="text" id="paci-busqueda-input" placeholder="Buscar paciente por nombre, DNI, teléfono o email..." aria-label="Buscar paciente por nombre, DNI, teléfono o email" autocomplete="off">
     </div>
     <div class="paci-contador hidden" id="paci-contador"></div>
     <div class="paci-orden">

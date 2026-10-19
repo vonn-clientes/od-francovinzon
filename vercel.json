@@ -29,6 +29,11 @@
   },
   "redirects": [
     {
+      "source": "/index_new.html",
+      "destination": "https://odfrancovinzon.vonn.com.ar/",
+      "permanent": true
+    },
+    {
       "source": "/((?!api/|gestion|admin|pacientes|turno|turnos|mobilephotouploader|t/|assets/).*)",
       "has": [
         {

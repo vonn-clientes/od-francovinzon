@@ -400,7 +400,7 @@
   <div class="login-box">
     <img src="../assets/isologo.png" alt="">
     <h1>Pacientes</h1>
-    <input type="password" id="key-input" placeholder="Clave de acceso" autocomplete="off">
+    <input type="password" id="key-input" placeholder="Clave de acceso" aria-label="Clave de acceso" autocomplete="off">
     <button id="login-btn">Entrar</button>
     <div class="login-error" id="login-error"></div>
   </div>
@@ -428,7 +428,7 @@
   </div>
 
   <div class="sticky-bar">
-    <div class="search-box"><input type="text" id="search-input-sticky" placeholder="Buscar por nombre o DNI..."></div>
+    <div class="search-box"><input type="text" id="search-input-sticky" placeholder="Buscar por nombre o DNI..." aria-label="Buscar ficha por nombre o DNI"></div>
     <button class="btn-nuevo" id="btn-nuevo-paciente-sticky">+ Nuevo paciente</button>
   </div>
 
@@ -697,7 +697,7 @@
   <div class="fotos-box">
     <div class="fotos-box-header">
       <h3>Fotos del paciente</h3>
-      <button type="button" class="fotos-box-close" id="fotos-cerrar">✕</button>
+      <button type="button" class="fotos-box-close" id="fotos-cerrar" aria-label="Cerrar fotos del paciente">✕</button>
     </div>
     <label class="fotos-input-label" id="fotos-input-label">
       <span class="icon">📷</span>
@@ -705,7 +705,7 @@
       <input type="file" accept="image/*" capture="environment" id="fotos-input">
     </label>
     <div id="fotos-preview-wrap" class="fotos-preview-wrap hidden"><img id="fotos-preview-img" alt=""></div>
-    <input type="text" id="fotos-descripcion" class="fotos-descripcion-input" placeholder="Descripción (opcional)">
+    <input type="text" id="fotos-descripcion" class="fotos-descripcion-input" placeholder="Descripción (opcional)" aria-label="Descripción de la foto (opcional)">
     <button class="btn-confirm" id="fotos-subir-btn" disabled style="width:100%; margin-top:6px;">Subir foto</button>
     <div class="panel-msg hidden" id="fotos-upload-msg"></div>
     <div class="fotos-grid" id="fotos-grid" style="margin-top:16px;"></div>
@@ -728,7 +728,7 @@
   <div class="fotos-box receta-box">
     <div class="fotos-box-header">
       <h3>Recetas</h3>
-      <button type="button" class="fotos-box-close" id="recetas-cerrar">✕</button>
+      <button type="button" class="fotos-box-close" id="recetas-cerrar" aria-label="Cerrar recetas del paciente">✕</button>
     </div>
 
     <div id="recetas-vista-lista">

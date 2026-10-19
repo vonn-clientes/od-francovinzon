@@ -80,6 +80,7 @@ export default async function handler(req, res) {
       if (recurso === 'metricas') return await servirMetricas('basicas', getMetricas, req, res);
       if (recurso === 'metricas-avanzadas') return await servirMetricas('avanzadas', getMetricasAvanzadas, req, res);
       if (recurso === 'publico-objetivo') return await servirMetricas('perfil', calcularPerfilJson, req, res);
+      if (recurso === 'pacientes-totales') return await conError(getPacientesTotales, req, res);
       // Los export-* devuelven un archivo (PDF/CSV), no JSON — si algo dentro tira,
       // el catch de más abajo los mandaría igual por el camino genérico de
       // "Error inesperado." sin ninguna pista. Acá sí se envuelve cada uno para
@@ -488,6 +489,31 @@ async function leerSnapshot(nombre) {
   return JSON.parse(zlib.gunzipSync(Buffer.from(comprimido, 'base64')).toString('utf8'));
 }
 
+function snapshotCompleto(nombre, data) {
+  if (nombre === 'basicas' || nombre === 'avanzadas') {
+    if (data?.fichasFallidas == null) return false;
+    if (!Number.isFinite(Number(data?.fichasFallidas))) return false;
+    if (nombre === 'basicas' && data?.totalFichas == null) return false;
+    if (nombre === 'basicas' && !Number.isFinite(Number(data?.totalFichas))) return false;
+    if (nombre === 'avanzadas' && data?.totalFichasEscaneadas == null) return false;
+    if (nombre === 'avanzadas' && !Number.isFinite(Number(data?.totalFichasEscaneadas))) return false;
+    if (Number(data?.fichasFallidas) > 0) return false;
+    if (nombre === 'avanzadas' && data?.pacientesTotales?.total == null) return false;
+  }
+  if (nombre === 'perfil') {
+    const fallidas = (data?.filas || []).find((f) => f[0] === 'Resumen' && f[1] === 'Fichas que no se pudieron leer');
+    if (Number(fallidas?.[3]) > 0 || (data?.filas || []).some((f) => f[0] === 'Resumen' && String(f[1]).startsWith('Aviso:'))) return false;
+  }
+  return data?.success !== false && !data?.errores?.length;
+}
+
+function limpiarMetricasParaPanel(nombre, data) {
+  if (nombre !== 'avanzadas') return data;
+  const limpio = { ...data, pacientesTotales: resumirPacientesTotales(data?.pacientesTotales) };
+  delete limpio.fichasIdentidad;
+  return limpio;
+}
+
 // Corre un handler existente (que responde con res.status().json()) y devuelve el JSON.
 function capturarJson(fn, req) {
   return new Promise((resolve, reject) => {
@@ -500,28 +526,28 @@ async function servirMetricas(nombre, calcular, req, res) {
   const dias = Number(req.query.dias) || 30;
   if (dias === 30 && !req.query.forzar) {
     const snap = await leerSnapshot(nombre).catch(() => null);
-    if (snap) return res.status(200).json({ ...snap.data, generadoEn: snap.generadoEn, desdeCache: true });
+    if (snap && snapshotCompleto(nombre, snap.data)) return res.status(200).json({ ...limpiarMetricasParaPanel(nombre, snap.data), generadoEn: snap.generadoEn, desdeCache: true });
   }
-  const data = await capturarJson(calcular, req);
-  if (dias === 30 && !data.errores?.length && data.success !== false) await guardarSnapshot(nombre, data).catch((err) => console.warn('[admin.js] no se pudo guardar el snapshot:', err?.message || err));
+  const data = limpiarMetricasParaPanel(nombre, await capturarJson(calcular, req));
+  if (dias === 30 && snapshotCompleto(nombre, data)) await guardarSnapshot(nombre, data).catch((err) => console.warn('[admin.js] no se pudo guardar el snapshot:', err?.message || err));
   return res.status(200).json({ ...data, generadoEn: new Date().toISOString(), desdeCache: false });
 }
 
 // Perfil de pacientes (buyer persona) en JSON: reutiliza el export anónimo (12 meses).
-function calcularPerfilJson(_req, res) {
-  return exportPerfilPacientes({ query: { meses: 12, formato: 'json' } }, res);
+function calcularPerfilJson(req, res) {
+  return exportPerfilPacientes({ query: { meses: 12, formato: 'json', forzar: req.query?.forzar } }, res);
 }
 
 const PARTES_METRICAS = {
   basicas: () => capturarJson(getMetricas, { query: { dias: 30, forzar: 1 } }),
-  avanzadas: () => capturarJson(getMetricasAvanzadas, { query: { dias: 30, forzar: 1 } }),
+  avanzadas: () => capturarJson(getMetricasAvanzadas, { query: { dias: 30 } }),
   perfil: () => capturarJson(calcularPerfilJson, {}),
 };
 
 async function calcularYGuardarParte(nombre) {
   try {
-    const data = await PARTES_METRICAS[nombre]();
-    if (data.success === false || data.errores?.length) return `no se guardó: ${data.error || data.errores.join(' · ')}`;
+    const data = limpiarMetricasParaPanel(nombre, await PARTES_METRICAS[nombre]());
+    if (!snapshotCompleto(nombre, data)) return `no se guardó: lectura incompleta${data.errorLectura ? ` (${data.errorLectura})` : ''}`;
     await guardarSnapshot(nombre, data);
     return 'ok';
   } catch (err) {
@@ -530,8 +556,8 @@ async function calcularYGuardarParte(nombre) {
   }
 }
 
-// Cada parte pesada corre en su PROPIA invocación (límite de 300 s por separado): la tarea
-// principal solo las dispara y espera, así el conjunto no se pasa del tiempo máximo.
+// La tarea diaria ejecuta las métricas en una sola invocación para reutilizar el escaneo
+// de fichas y no triplicar las llamadas a Sheets.
 async function metricasCron(req, res, viaCron) {
   const parte = req.query.parte;
   if (parte) {
@@ -542,16 +568,11 @@ async function metricasCron(req, res, viaCron) {
   const host = req.headers?.host;
   const secreto = process.env.CRON_SECRET;
   const headers = secreto ? { authorization: `Bearer ${secreto}` } : {};
-  const key = req.query.key ? `&key=${encodeURIComponent(req.query.key)}` : '';
-  await Promise.all(Object.keys(PARTES_METRICAS).map(async (nombre) => {
-    try {
-      const r = await fetch(`https://${host}/api/gestion/admin?recurso=metricas-cron&parte=${nombre}${key}`, { headers, signal: AbortSignal.timeout(285000) });
-      const j = await r.json().catch(() => ({}));
-      resultado[nombre] = j.resultado || `HTTP ${r.status}`;
-    } catch (err) {
-      resultado[nombre] = `sin respuesta a tiempo (puede seguir corriendo): ${err?.message || err}`;
-    }
-  }));
+  // Las partes comparten el escaneo de fichas en memoria. Ejecutarlas en paralelo
+  // triplica las llamadas a Sheets y supera la cuota cuando hay cientos de pacientes.
+  for (const nombre of Object.keys(PARTES_METRICAS)) {
+    resultado[nombre] = await calcularYGuardarParte(nombre);
+  }
   // Vercel Hobby permite solo 2 crons: este reemplaza al del chequeo de salud, así que lo
   // dispara acá mismo (mejor esfuerzo, no cambia el resultado de las métricas).
   if (viaCron && secreto && host) {
@@ -627,87 +648,111 @@ async function calcularTurnos(desde, hasta) {
   return { eventos, porDia, online, cargadoAyelen, confirmados, nuevos, recurrentes, total };
 }
 
-// Deuda: recorre las fichas de Pacientes leyendo el saldo — hoja liviana (unas pocas
-// celdas por ficha), pero son N llamadas a Sheets. Se acota a 200 fichas y se
-// consulta en lotes secuenciales (mismo criterio que el resto del proyecto con la
-// cuota de Google, ver CLAUDE.md) para no disparar todo junto. Con muchos pacientes
-// esto es lo más lento de todo el dashboard con diferencia — se cachea en memoria
-// del proceso 2 minutos para que recargar el dashboard varias veces seguidas (como
-// al estar probándolo) no vuelva a escanear todas las fichas cada vez.
-let cacheDeuda = null; // { valor, ts }
-const TTL_DEUDA_MS = 120000;
-async function calcularDeuda(forzar) {
-  if (!forzar && cacheDeuda && Date.now() - cacheDeuda.ts < TTL_DEUDA_MS) return cacheDeuda.valor;
+// Un solo escaneo compartido por las métricas, deuda y buyer persona. Antes cada tarjeta
+// recorría cientos de spreadsheets por separado y el dashboard disparaba esas lecturas a
+// la vez: la cuota de Sheets se agotaba y los snapshots guardaban resultados parciales.
+// Se piden solo campos anónimos y financieros en un batchGet por ficha y se comparte el
+// resultado en memoria. Nunca se descargan nombre, DNI, teléfono ni domicilio.
+let cacheEscaneoFichas = null; // { valor, ts }
+const TTL_ESCANEO_FICHAS_MS = 5 * 60 * 1000;
+const LOTE_ESCANEO_FICHAS = 3;
 
-  let conDeuda = 0, totalPacientesConSaldo = 0, fallidos = 0;
-  const topDeudoresMonto = [];
-  const topDeudoresAntiguedad = [];
-  try {
+const esperarAdmin = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function escanearFichasAdmin(forzar = false) {
+  // Si ya hay un escaneo en curso, que las otras tarjetas esperen ese mismo resultado.
+  if (cacheEscaneoFichas?.promesa) return cacheEscaneoFichas.promesa;
+  if (!forzar && cacheEscaneoFichas?.valor && Date.now() - cacheEscaneoFichas.ts < TTL_ESCANEO_FICHAS_MS) {
+    return cacheEscaneoFichas.valor;
+  }
+  cacheDeuda = null;
+  cacheFinanzas = null;
+
+  const promesa = (async () => {
     const drive = getPacientesDriveClient();
     const sheets = getPacientesSheetsClient();
-
-    // Paginado completo — con `pageSize` solo (sin seguir `nextPageToken`) se corta
-    // en la primera página y cualquier ficha más allá de esa página queda afuera del
-    // cálculo entero, en silencio (bug real sospechado en producción, 2026-08-13: "no
-    // se están tomando valores más altos"). PACIENTES_FOLDER_ID no debería tener miles
-    // de archivos, pero no hay motivo para asumir un tope arbitrario acá.
     let archivos = [];
     let pageToken;
     do {
       const { data } = await conReintentos(() => drive.files.list({
         q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
-        fields: 'files(id, name), nextPageToken',
-        pageSize: 250,
-        pageToken,
+        fields: 'files(id, name), nextPageToken', pageSize: 250, pageToken,
       }));
       archivos = archivos.concat(data.files || []);
       pageToken = data.nextPageToken;
     } while (pageToken);
     archivos = archivos.filter((f) => !/^⭐/.test(f.name));
 
-    const LOTE = 25;
-    for (let i = 0; i < archivos.length; i += LOTE) {
-      const lote = archivos.slice(i, i + LOTE);
+    const fichas = [];
+    let fallidos = 0;
+    let ultimoError = '';
+    for (let i = 0; i < archivos.length; i += LOTE_ESCANEO_FICHAS) {
+      const lote = archivos.slice(i, i + LOTE_ESCANEO_FICHAS);
       const resultados = await Promise.all(lote.map(async (f) => {
         try {
-          const { data: fin } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: f.id, range: `${SHEET_NAME}!E6:F11` }));
-          const rows = fin.values || [];
-          const saldoTexto = rows[2]?.[1] || '$0,00';
-          const diasSinPagoTexto = rows[5]?.[1] || '';
-          const saldoNum = parsearMontoArgentino(saldoTexto);
-          // La celda de "días sin pago" de la plantilla (=HOY()-últimoPago) devuelve el
-          // serial de HOY (~46000 y pico en 2026) cuando no hay último pago cargado, en
-          // vez de un valor sensato — se descarta cualquier cosa por encima de 10 años
-          // como dato no confiable en vez de mostrar una antigüedad absurda.
-          const diasNumCrudo = parseInt(String(diasSinPagoTexto).replace(/\D/g, ''), 10) || 0;
-          const diasNum = diasNumCrudo > 3650 ? 0 : diasNumCrudo;
-          const { nombre, apellido } = parsearNombreArchivo(f.name);
-          return { nombre: `${nombre} ${apellido}`.trim(), saldo: saldoNum, dias: diasNum };
+          const { data } = await conReintentos(() => sheets.spreadsheets.values.batchGet({
+            spreadsheetId: f.id,
+            ranges: [`${SHEET_NAME}!C8`, `${SHEET_NAME}!C10:C11`, `${SHEET_NAME}!C15`, `${SHEET_NAME}!E6:F11`, rangoMovimientos()],
+          }));
+          const [nacRaw, locOsRaw, planRaw, finRaw, movRaw] = data.valueRanges || [];
+          const celda = (r, i = 0) => (r?.values?.[i]?.[0] != null ? String(r.values[i][0]) : '');
+          const fin = finRaw?.values || [];
+          const filasMovimiento = (movRaw?.values || []).map((row) => ({
+            fecha: row[0] || '', tratamiento: row[1] || '', debe: row[2] || '', haber: row[3] || '',
+            saldo: row[4] || '', formaPago: row[6] || '',
+          }));
+          const saldoTexto = fin[2]?.[1] || '$0,00';
+          const diasRaw = parseInt(String(fin[5]?.[1] || '').replace(/\D/g, ''), 10) || 0;
+          return {
+            id: f.id, archivo: f.name,
+            fechaNacimiento: celda(nacRaw), localidad: celda(locOsRaw, 0), obraSocial: celda(locOsRaw, 1),
+            planTratamiento: celda(planRaw),
+            saldo: parsearMontoArgentino(saldoTexto), diasSinPago: diasRaw > 3650 ? 0 : diasRaw,
+            movimientos: filasMovimiento,
+          };
         } catch (err) {
-          console.warn(`[admin.js] no se pudo leer la ficha ${f.name} para deuda:`, err?.message || err);
+          ultimoError = err?.message || String(err);
+          console.warn(`[admin.js] no se pudo leer la ficha ${f.name} para métricas:`, ultimoError);
           return null;
         }
       }));
-      resultados.forEach((r) => {
-        if (!r) { fallidos++; return; }
-        totalPacientesConSaldo++;
-        if (r.saldo > 0) {
-          conDeuda++;
-          topDeudoresMonto.push(r);
-          if (r.dias > 0) topDeudoresAntiguedad.push(r);
-        }
-      });
+      resultados.forEach((r) => { if (r) fichas.push(r); else fallidos++; });
+      // Evita ráfagas entre lotes sin ralentizar en exceso las lecturas normales.
+      if (i + LOTE_ESCANEO_FICHAS < archivos.length) await esperarAdmin(600);
     }
-    if (fallidos > 0) {
-      console.warn(`[admin.js] deuda: ${fallidos} de ${archivos.length} fichas no se pudieron leer (quedan afuera del cálculo)`);
-    }
-  } catch (err) {
-    console.warn('[admin.js] no se pudo calcular deuda de pacientes:', err?.message || err);
-  }
+    return { fichas, total: archivos.length, fallidos, ultimoError };
+  })();
 
+  cacheEscaneoFichas = { promesa, ts: Date.now(), valor: null };
+  try {
+    const valor = await promesa;
+    cacheEscaneoFichas = { valor, ts: Date.now() };
+    return valor;
+  } catch (err) {
+    cacheEscaneoFichas = null;
+    throw err;
+  }
+}
+
+// Deuda se deriva del mismo escaneo que finanzas y buyer persona.
+let cacheDeuda = null; // { valor, ts }
+const TTL_DEUDA_MS = 120000;
+async function calcularDeuda(forzar) {
+  if (!forzar && cacheDeuda && Date.now() - cacheDeuda.ts < TTL_DEUDA_MS) return cacheDeuda.valor;
+  const escaneo = await escanearFichasAdmin(forzar);
+  const fichas = escaneo.fichas.map((f) => ({
+    nombre: `${parsearNombreArchivo(f.archivo).nombre} ${parsearNombreArchivo(f.archivo).apellido}`.trim(),
+    saldo: f.saldo, dias: f.diasSinPago,
+  }));
+  const conDeuda = fichas.filter((f) => f.saldo > 0).length;
+  const totalPacientesConSaldo = fichas.length;
+  const fallidos = escaneo.fallidos;
+  const topDeudoresMonto = fichas.filter((f) => f.saldo > 0);
+  const topDeudoresAntiguedad = fichas.filter((f) => f.saldo > 0 && f.dias > 0);
   topDeudoresMonto.sort((a, b) => b.saldo - a.saldo);
   topDeudoresAntiguedad.sort((a, b) => b.dias - a.dias);
-  const valor = { conDeuda, totalPacientesConSaldo, fallidos, topDeudoresMonto, topDeudoresAntiguedad };
+  const valor = { conDeuda, totalPacientesConSaldo, totalFichas: escaneo.total, fallidos, topDeudoresMonto, topDeudoresAntiguedad,
+    ...(fallidos ? { errorLectura: escaneo.ultimoError } : {}) };
   cacheDeuda = { valor, ts: Date.now() };
   return valor;
 }
@@ -749,7 +794,7 @@ async function getMetricas(req, res) {
   const errores = [];
   const [
     { eventos, porDia, online, cargadoAyelen, confirmados, nuevos, recurrentes, total },
-    { conDeuda, totalPacientesConSaldo, fallidos: fichasFallidas, topDeudoresMonto, topDeudoresAntiguedad },
+    { conDeuda, totalPacientesConSaldo, totalFichas, fallidos: fichasFallidas, topDeudoresMonto, topDeudoresAntiguedad },
     { cancelados, reprogramados },
   ] = await Promise.all([
     calcularTurnos(desde, hasta).catch((err) => {
@@ -757,7 +802,11 @@ async function getMetricas(req, res) {
       errores.push(`turnos: ${err?.message || err}`);
       return TURNOS_VACIO;
     }),
-    calcularDeuda(!!req.query.forzar),
+    calcularDeuda(!!req.query.forzar).catch((err) => {
+      console.error('[admin.js] calcularDeuda falló:', err);
+      errores.push(`fichas/deuda: ${err?.message || err}`);
+      return { conDeuda: 0, totalPacientesConSaldo: null, fallidos: null, totalFichas: null, topDeudoresMonto: [], topDeudoresAntiguedad: [] };
+    }),
     calcularCancelacionesYReprogramaciones(desde, hasta),
   ]);
 
@@ -777,6 +826,7 @@ async function getMetricas(req, res) {
     topDeudoresMonto: topDeudoresMonto.slice(0, 10),
     topDeudoresAntiguedad: topDeudoresAntiguedad.slice(0, 10),
     totalPacientesConSaldo,
+    totalFichas,
     fichasFallidas,
   });
 }
@@ -929,67 +979,17 @@ async function calcularFinanzasPacientes(forzar) {
 
   const ingresosPorDia = {};
   const pagos = []; // { fechaISO, monto }
-  const fichasIdentidad = []; // { id, nombre, apellido, dni, telefono }
-  let fallidos = 0;
-
-  try {
-    const drive = getPacientesDriveClient();
-    const sheets = getPacientesSheetsClient();
-
-    let archivos = [];
-    let pageToken;
-    do {
-      const { data } = await conReintentos(() => drive.files.list({
-        q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
-        fields: 'files(id, name), nextPageToken',
-        pageSize: 250,
-        pageToken,
-      }));
-      archivos = archivos.concat(data.files || []);
-      pageToken = data.nextPageToken;
-    } while (pageToken);
-    archivos = archivos.filter((f) => !/^⭐/.test(f.name));
-
-    const LOTE = 25;
-    for (let i = 0; i < archivos.length; i += LOTE) {
-      const lote = archivos.slice(i, i + LOTE);
-      const resultados = await Promise.all(lote.map(async (f) => {
-        try {
-          const { data } = await conReintentos(() => sheets.spreadsheets.values.batchGet({
-            spreadsheetId: f.id,
-            ranges: [`${SHEET_NAME}!C5:C15`, rangoMovimientos()],
-          }));
-          const [identidadRaw, movRaw] = data.valueRanges || [];
-          const c = (identidadRaw?.values || []).map((r) => (r[0] != null ? String(r[0]) : ''));
-          while (c.length < 11) c.push('');
-          const [nombre, apellido, dni, , , , , , , telefono] = c;
-
-          const movimientos = (movRaw?.values || [])
-            .map((row) => ({ fecha: row[0] || '', tratamiento: row[1] || '', haber: row[3] || '' }))
-            .filter((m) => m.fecha && m.haber && !/^\[ANULADO\]/.test(m.tratamiento));
-
-          return { id: f.id, nombre, apellido, dni, telefono, movimientos };
-        } catch (err) {
-          console.warn(`[admin.js] no se pudo leer la ficha ${f.name} para finanzas:`, err?.message || err);
-          return null;
-        }
-      }));
-      resultados.forEach((r) => {
-        if (!r) { fallidos++; return; }
-        fichasIdentidad.push({ id: r.id, nombre: r.nombre, apellido: r.apellido, dni: r.dni, telefono: r.telefono });
-        r.movimientos.forEach((m) => {
-          const fechaISO = fechaSheetAIso(m.fecha);
-          if (!fechaISO) return;
-          const monto = parsearMontoArgentino(m.haber);
-          if (monto <= 0) return;
-          ingresosPorDia[fechaISO] = (ingresosPorDia[fechaISO] || 0) + monto;
-          pagos.push({ fechaISO, monto });
-        });
-      });
-    }
-  } catch (err) {
-    console.warn('[admin.js] no se pudo calcular finanzas de pacientes:', err?.message || err);
-  }
+  const escaneo = await escanearFichasAdmin(forzar);
+  escaneo.fichas.forEach((f) => f.movimientos
+    .filter((m) => m.fecha && m.haber && !/^\[ANULADO\]/.test(m.tratamiento))
+    .forEach((m) => {
+      const fechaISO = fechaSheetAIso(m.fecha);
+      if (!fechaISO) return;
+      const monto = parsearMontoArgentino(m.haber);
+      if (monto <= 0) return;
+      ingresosPorDia[fechaISO] = (ingresosPorDia[fechaISO] || 0) + monto;
+      pagos.push({ fechaISO, monto });
+    }));
 
   // (e) Ticket promedio en $ y USD, agrupado por mes y por año — cada pago se convierte
   // con la cotización blue REAL del día que se cobró (pedido explícito), no la de hoy.
@@ -1040,8 +1040,9 @@ async function calcularFinanzasPacientes(forzar) {
     ticketPorMes,
     ticketPorAnio,
     dolarError,
-    fichasIdentidad,
-    fichasFallidas: fallidos,
+    fichasFallidas: escaneo.fallidos,
+    totalFichasEscaneadas: escaneo.total,
+    ...(escaneo.fallidos ? { errorLectura: escaneo.ultimoError } : {}),
   };
   cacheFinanzas = { valor, ts: Date.now() };
   return valor;
@@ -1060,7 +1061,7 @@ async function calcularPacientesTotales() {
     filas = await listarPacientesConsolidados();
   } catch (err) {
     console.warn('[admin.js] no se pudo leer la planilla consolidada para pacientes totales:', err?.message || err);
-    return { total: null, totalFichas: null, totalSoloTurno: null, fichas: [], soloTurno: [] };
+    return { total: null, totalFichas: null, totalSoloTurno: null, fichas: [], soloTurno: [], error: err?.message || String(err) };
   }
 
   // Un mismo fichaId puede estar en 2 filas (la de la ficha y la de un teléfono de turno
@@ -1080,6 +1081,17 @@ async function calcularPacientesTotales() {
     fichas,
     soloTurno: soloTurno.slice(0, 500),
   };
+}
+
+async function getPacientesTotales(_req, res) {
+  const pacientesTotales = await calcularPacientesTotales();
+  const salida = _req.query.listado === '1' ? pacientesTotales : resumirPacientesTotales(pacientesTotales);
+  res.status(200).json({ success: pacientesTotales.total != null, pacientesTotales: salida });
+}
+
+function resumirPacientesTotales(pacientes = {}) {
+  const { total, totalFichas, totalSoloTurno, error } = pacientes;
+  return { total: total ?? null, totalFichas: totalFichas ?? null, totalSoloTurno: totalSoloTurno ?? null, ...(error ? { error } : {}) };
 }
 
 // ---------- Pacientes con turnos pero sin ficha ----------
@@ -1151,13 +1163,13 @@ async function getMetricasAvanzadas(req, res) {
     }),
     calcularFinanzasPacientes(!!req.query.forzar).catch((err) => {
       errores.push(`finanzas: ${err?.message || err}`);
-      return { ingresosDiarios: [], ticketPorMes: [], ticketPorAnio: [], fichasIdentidad: [], fichasFallidas: 0 };
+      return { ingresosDiarios: [], ticketPorMes: [], ticketPorAnio: [], fichasFallidas: 0 };
     }),
   ]);
 
   const pacientesTotales = await calcularPacientesTotales().catch((err) => {
     errores.push(`pacientes totales: ${err?.message || err}`);
-    return { total: null, totalFichas: null, totalSoloTurno: null, fichas: [], soloTurno: [] };
+    return { total: null, totalFichas: null, totalSoloTurno: null, fichas: [], soloTurno: [], error: err?.message || String(err) };
   });
 
   res.status(200).json({
@@ -1170,6 +1182,7 @@ async function getMetricasAvanzadas(req, res) {
     dolarError: finanzas.dolarError || null,
     pacientesTotales,
     fichasFallidas: finanzas.fichasFallidas,
+    totalFichasEscaneadas: finanzas.totalFichasEscaneadas,
   });
 }
 
@@ -1378,68 +1391,34 @@ async function exportFinancieroPdf(req, res) {
 // se lee lo mínimo y NO identificable:
 //   - Fichas: C8 (fecha de nacimiento), C10:C11 (localidad, obra social), C15 (plan de
 //     tratamiento) y los movimientos. Nombre/apellido/DNI (C5:C7), domicilio (C9), Nº de
-//     afiliado (C12) y teléfono (C14) NO se piden a la API.
+//     afiliado (C12) y teléfono (C14) NO se piden a la API. El escaneo compartido
+//     agrega además los saldos y movimientos que usan las métricas financieras.
 //   - Calendar: fecha/hora y la description (marca de paciente nuevo, carga manual,
 //     motivo → solo su categoría). El título del evento (= nombre del paciente) no se usa.
 //   - Planilla consolidada: solo las columnas numéricas de asistencia/visitas.
 // No modifica fichas ni turnos: solo lee (la planilla consolidada se lee con la misma
-// función que usa el dashboard de métricas). Mismo patrón de lotes de 25
-// que calcularFinanzasPacientes() para cuidar la cuota de Google.
+// función que usa el dashboard de métricas). Las fichas comparten el escaneo acotado
+// de admin para evitar recorridos repetidos.
 async function exportPerfilPacientes(req, res) {
   const meses = Math.min(Math.max(Number(req.query.meses) || 12, 1), 36);
   const errores = [];
 
   // ---- Fichas ----
-  const fichas = [];
-  let fichasFallidas = 0;
+  let escaneo;
   try {
-    const drive = getPacientesDriveClient();
-    const sheets = getPacientesSheetsClient();
-    let archivos = [];
-    let pageToken;
-    do {
-      const { data } = await conReintentos(() => drive.files.list({
-        q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
-        fields: 'files(id, name), nextPageToken',
-        pageSize: 250,
-        pageToken,
-      }));
-      archivos = archivos.concat(data.files || []);
-      pageToken = data.nextPageToken;
-    } while (pageToken);
-    archivos = archivos.filter((f) => !/^⭐/.test(f.name));
-
-    const LOTE = 25;
-    for (let i = 0; i < archivos.length; i += LOTE) {
-      const lote = archivos.slice(i, i + LOTE);
-      const resultados = await Promise.all(lote.map(async (f) => {
-        try {
-          const { data } = await conReintentos(() => sheets.spreadsheets.values.batchGet({
-            spreadsheetId: f.id,
-            ranges: [`${SHEET_NAME}!C8`, `${SHEET_NAME}!C10:C11`, `${SHEET_NAME}!C15`, rangoMovimientos()],
-          }));
-          const [nacRaw, locOsRaw, planRaw, movRaw] = data.valueRanges || [];
-          const celda = (r, i2 = 0) => (r?.values?.[i2]?.[0] != null ? String(r.values[i2][0]) : '');
-          return {
-            fechaNacimiento: celda(nacRaw),
-            localidad: celda(locOsRaw, 0),
-            obraSocial: celda(locOsRaw, 1),
-            planTratamiento: celda(planRaw),
-            // B..H = Fecha, Tratamiento, Debe, Haber, Saldo, (vacía), Forma de pago
-            movimientos: (movRaw?.values || []).map((row) => ({
-              fecha: row[0] || '', tratamiento: row[1] || '', debe: row[2] || '', haber: row[3] || '', formaPago: row[6] || '',
-            })),
-          };
-        } catch (err) {
-          console.warn('[admin.js] perfil anónimo: no se pudo leer una ficha:', err?.message || err);
-          return null;
-        }
-      }));
-      resultados.forEach((r) => { if (r) fichas.push(r); else fichasFallidas++; });
-    }
+    escaneo = await escanearFichasAdmin(!!req.query.forzar);
   } catch (err) {
     errores.push(`fichas: ${err?.message || err}`);
+    escaneo = { fichas: [], total: 0, fallidos: 0 };
   }
+  // La salida anónima recibe solo los campos permitidos por lib/perfilPacientes.js;
+  // nombres, DNI, contacto y domicilio se descartan antes de construir el perfil.
+  const fichas = escaneo.fichas.map((f) => ({
+    fechaNacimiento: f.fechaNacimiento, localidad: f.localidad, obraSocial: f.obraSocial,
+    planTratamiento: f.planTratamiento,
+    movimientos: f.movimientos.map((m) => ({ fecha: m.fecha, tratamiento: m.tratamiento, debe: m.debe, haber: m.haber, formaPago: m.formaPago })),
+  }));
+  const fichasFallidas = escaneo.fallidos;
 
   // ---- Turnos ----
   const turnos = [];

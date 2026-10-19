@@ -254,7 +254,8 @@
         <div class="card">
           <h2>Pacientes totales</h2>
           <div class="stat-grid" id="dash-pacientes-stats"></div>
-          <button class="btn btn-outline" id="dash-pacientes-toggle" style="margin-top:4px;">Ver listado completo</button>
+          <div class="msg" id="dash-pacientes-msg" aria-live="polite"></div>
+          <button class="btn btn-outline" id="dash-pacientes-toggle" aria-expanded="false" aria-controls="dash-pacientes-wrap" style="margin-top:4px;">Ver listado completo</button>
           <div class="table-wrap hidden" id="dash-pacientes-wrap" style="margin-top:12px;">
             <table id="dash-pacientes-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Origen</th><th></th></tr></thead><tbody></tbody></table>
           </div>
@@ -588,7 +589,6 @@
     }).catch(() => {});
     cargarSeccion('dashboard');
   }
-  if (adminKey) arrancar();
 
   // ---------- Navegación ----------
   const SECCIONES_CARGADAS = new Set();
@@ -603,7 +603,14 @@
     if (SECCIONES_CARGADAS.has(sec)) return;
     SECCIONES_CARGADAS.add(sec);
     const loaders = {
-      dashboard: () => { cargarDashboard(); cargarDashboardAvanzado(); cargarPublico(); cargarSinFicha(); },
+      // Evita que deuda, finanzas y público objetivo abran a la vez tres recorridos
+      // completos por las fichas. El servidor comparte el escaneo entre estas cargas.
+      dashboard: async () => {
+        await Promise.all([cargarDashboard(), cargarPacientesTotales()]);
+        await cargarDashboardAvanzado();
+        await cargarPublico();
+        await cargarSinFicha();
+      },
       'reserva-online': cargarReservaOnline,
       horarios: cargarHorarios, textos: cargarTextos,
       listas: cargarListas, radios: cargarRadios, pacientes: () => {},
@@ -673,9 +680,11 @@
       // si se están completando todos los saldos").
       const completitud = document.getElementById('dash-deuda-completitud');
       completitud.textContent = m.fichasFallidas
-        ? `⚠️ ${m.fichasFallidas} de ${m.totalPacientesConSaldo + m.fichasFallidas} fichas no se pudieron leer para este cálculo — puede faltar algún deudor. Probá "Actualizar".`
-        : `Calculado sobre ${m.totalPacientesConSaldo} fichas.`;
-      completitud.style.color = m.fichasFallidas ? 'var(--bad)' : '';
+        ? `⚠️ Se leyeron ${m.totalPacientesConSaldo} de ${m.totalFichas || (m.totalPacientesConSaldo + m.fichasFallidas)} fichas. Algunos saldos pueden faltar. ${m.errorLectura ? `Último error: ${m.errorLectura}` : 'Volvé a actualizar en un momento.'}`
+        : m.totalFichas == null
+          ? '⚠️ No se pudo completar la lectura de las fichas. Revisá el mensaje de error.'
+          : `Calculado sobre ${m.totalPacientesConSaldo} fichas.`;
+      completitud.style.color = m.fichasFallidas || m.totalFichas == null ? 'var(--bad)' : '';
 
       // Algunas partes pueden fallar sin tumbar el resto (ver getMetricas en
       // api/gestion/admin.js) — si pasó, se muestra acá el motivo real en vez de
@@ -702,6 +711,32 @@
   }
 
   let pacientesTotalesCache = null;
+  function renderPacientesTotales(pt = {}) {
+    const detalleYaCargado = Array.isArray(pacientesTotalesCache && pacientesTotalesCache.fichas) && Array.isArray(pacientesTotalesCache && pacientesTotalesCache.soloTurno);
+    pacientesTotalesCache = detalleYaCargado && !Array.isArray(pt.fichas)
+      ? { ...pt, fichas: pacientesTotalesCache.fichas, soloTurno: pacientesTotalesCache.soloTurno }
+      : pt;
+    const tarjetas = [
+      ['Pacientes totales', pt.total ?? '—'],
+      ['Con ficha', pt.totalFichas ?? '—'],
+      ['Solo turnos (sin ficha)', pt.totalSoloTurno ?? '—'],
+    ];
+    document.getElementById('dash-pacientes-stats').innerHTML = tarjetas
+      .map(([label, num]) => '<div class="stat-tile"><div class="num">' + escapeHtmlAdmin(String(num)) + '</div><div class="label">' + escapeHtmlAdmin(label) + '</div></div>').join('');
+    if (Array.isArray(pt.fichas) && Array.isArray(pt.soloTurno)) renderPacientesTotalesTabla();
+    setMsg('dash-pacientes-msg', pt.total == null ? (pt.error || 'No se pudieron leer los pacientes.') : '', pt.total == null ? 'error' : '');
+  }
+
+  async function cargarPacientesTotales() {
+    document.getElementById('dash-pacientes-stats').innerHTML = '<p class="hint">Leyendo pacientes…</p>';
+    try {
+      const r = await apiGet('pacientes-totales');
+      renderPacientesTotales(r.pacientesTotales || {});
+    } catch (e) {
+      if (e.message !== 'unauthorized') renderPacientesTotales({ error: e.message || 'No se pudieron leer los pacientes.' });
+    }
+  }
+
   // ---------- Público objetivo (buyer persona) ----------
   // Los datos vienen de "filas" = [sección, categoría, detalle, cantidad, % dentro de la sección]
   // (mismo perfil anónimo del export). Todo se arma acá en el navegador.
@@ -720,6 +755,8 @@
         el.textContent = m.desdeCache ? `Datos del ${cuando} (se actualizan solos a las 2:00).` : `Actualizado en vivo: ${cuando}.`;
       }
       renderPublico(m.filas || []);
+      const fallidas = (m.filas || []).find((f) => f[0] === 'Resumen' && f[1] === 'Fichas que no se pudieron leer');
+      setMsg('pub-msg', Number(fallidas?.[3]) > 0 ? `Se analizaron parcialmente las fichas: ${fallidas[3]} no se pudieron leer.` : '', Number(fallidas?.[3]) > 0 ? 'error' : '');
     } catch (e) {
       if (e.message !== 'unauthorized') {
         document.getElementById('pub-persona').innerHTML = '';
@@ -749,7 +786,7 @@
       ['Edad mediana', edadMed != null ? `${String(edadMed).replace('.', ',')} años` : 'N/D'],
     ].map(([l, n]) => `<div class="stat-tile"><div class="num">${esc(String(n))}</div><div class="label">${esc(l)}</div></div>`).join('');
 
-    // Persona principal (frase armada con los datos dominantes)
+    // Mostrar tendencias independientes: los máximos de cada categoría no representan necesariamente a la misma persona.
     const franja = tope('Edad (franja)');
     const fin = tope('Financiación');
     const loc = tope('Localidad');
@@ -758,18 +795,16 @@
     const horario = tope('Turnos por franja horaria');
     const canal = tope('Turnos: canal de reserva');
     const pct = (f) => (f ? `${String(f[4]).replace('.', ',')}%` : '');
-    const partes = [];
-    if (franja) partes.push(`tiene entre <strong>${esc(franja[1])}</strong> años (${pct(franja)} de las fichas)`);
-    if (loc) partes.push(`vive en <strong>${esc(loc[1])}</strong> (${pct(loc)})`);
-    if (fin) partes.push(`se atiende como <strong>${esc(fin[1].toLowerCase())}</strong> (${pct(fin)})`);
-    if (trat) partes.push(`el tratamiento más frecuente es <strong>${esc(trat[1].toLowerCase())}</strong>`);
-    const hab = [];
-    if (dia) hab.push(`los <strong>${esc(dia[1].toLowerCase())}</strong>`);
-    if (horario) hab.push(`en horario de <strong>${esc(horario[1].toLowerCase())}</strong>`);
-    document.getElementById('pub-persona').innerHTML = partes.length ? `
+    const hallazgos = [
+      ['Edad más frecuente', franja], ['Localidad más frecuente', loc],
+      ['Tipo de cobertura más común', fin], ['Tratamiento más frecuente', trat],
+      ['Día con más turnos', dia], ['Horario con más turnos', horario], ['Canal de reserva más usado', canal],
+    ].filter(([, f]) => f);
+    document.getElementById('pub-persona').innerHTML = hallazgos.length ? `
       <div style="background:var(--cream);border-left:4px solid var(--gold);border-radius:10px;padding:14px 16px;">
-        <div style="font-family:'Fraunces',Georgia,serif;font-size:17px;color:var(--navy);margin-bottom:6px;">Paciente más frecuente</div>
-        <div style="font-size:14px;line-height:1.5;">Quien más se atiende ${partes.join(', ')}.${hab.length ? ` Suele sacar turno ${hab.join(' ')}` : ''}${canal ? `${hab.length ? ', ' : ' Suele sacar turno '}${esc(canal[1].toLowerCase().includes('online') ? 'reservando online' : 'por teléfono, WhatsApp o en persona')} (${pct(canal)})` : ''}${hab.length || canal ? '.' : ''}</div>
+        <div style="font-family:'Fraunces',Georgia,serif;font-size:17px;color:var(--navy);margin-bottom:6px;">Tendencias principales</div>
+        <ul style="margin:0;padding-left:20px;font-size:14px;line-height:1.7;">${hallazgos.map(([label, f]) => `<li><strong>${esc(label)}:</strong> ${esc(f[1])} (${pct(f)})</li>`).join('')}</ul>
+        <div class="hint" style="margin:8px 0 0;">Cada tendencia se calcula por separado; no significa que todas describan a la misma persona.</div>
       </div>` : '<p class="hint">Todavía no hay datos suficientes para armar el perfil.</p>';
 
     // Segmentos: cada franja etaria con su financiación y tratamientos dominantes
@@ -821,7 +856,6 @@
     document.getElementById('dash-inasistencia-bars').innerHTML = '';
     document.getElementById('dash-ingresos-stats').innerHTML = '<p class="hint">Cargando…</p>';
     document.getElementById('dash-ingresos-bars').innerHTML = '';
-    document.getElementById('dash-pacientes-stats').innerHTML = '<p class="hint">Cargando…</p>';
     setMsg('dash2-msg', '', '');
     try {
       const m = await apiGet('metricas-avanzadas', forzar ? { forzar: 1 } : {});
@@ -883,14 +917,8 @@
       ).join('') || '<tr><td colspan="4">Sin pagos registrados.</td></tr>';
 
       // (d) Pacientes totales
-      pacientesTotalesCache = m.pacientesTotales;
       const pt = m.pacientesTotales || {};
-      document.getElementById('dash-pacientes-stats').innerHTML = [
-        ['Pacientes totales', pt.total ?? 'N/D'],
-        ['Con ficha', pt.totalFichas ?? 'N/D'],
-        ['Solo turnos (sin ficha)', pt.totalSoloTurno ?? 'N/D'],
-      ].map(([label, num]) => `<div class="stat-tile"><div class="num">${num}</div><div class="label">${label}</div></div>`).join('');
-      renderPacientesTotalesTabla();
+      renderPacientesTotales(pt);
 
       const mensajes = [];
       if (m.errores?.length) mensajes.push(...m.errores);
@@ -904,11 +932,12 @@
   document.getElementById('dash2-refrescar').addEventListener('click', () => cargarDashboardAvanzado(true));
 
   // El listado completo arranca oculto (puede ser largo) — se pinta ya cargado desde
-  // pacientesTotalesCache, sin volver a pedir nada al servidor.
+  // cuando se abre; la pantalla inicial solo pide los conteos.
   function renderPacientesTotalesTabla() {
     const pt = pacientesTotalesCache;
     const tbody = document.querySelector('#dash-pacientes-tabla tbody');
     if (!pt) { tbody.innerHTML = ''; return; }
+    if (!Array.isArray(pt.fichas) || !Array.isArray(pt.soloTurno)) { tbody.innerHTML = ''; return; }
     const filasFicha = (pt.fichas || []).map((f) => `
       <tr>
         <td>${escapeHtmlAdmin(`${f.nombre || ''} ${f.apellido || ''}`.trim())}</td>
@@ -932,8 +961,22 @@
     d.textContent = str;
     return d.innerHTML;
   }
-  document.getElementById('dash-pacientes-toggle').addEventListener('click', () => {
-    document.getElementById('dash-pacientes-wrap').classList.toggle('hidden');
+  document.getElementById('dash-pacientes-toggle').addEventListener('click', async (e) => {
+    const wrap = document.getElementById('dash-pacientes-wrap');
+    const boton = e.currentTarget;
+    const mostrar = wrap.classList.contains('hidden');
+    wrap.classList.toggle('hidden', !mostrar);
+    boton.textContent = mostrar ? 'Ocultar listado' : 'Ver listado completo';
+    boton.setAttribute('aria-expanded', String(mostrar));
+    if (!mostrar || (Array.isArray(pacientesTotalesCache?.fichas) && Array.isArray(pacientesTotalesCache?.soloTurno))) return;
+    document.querySelector('#dash-pacientes-tabla tbody').innerHTML = '<tr><td colspan="5">Cargando listado…</td></tr>';
+    try {
+      const r = await apiGet('pacientes-totales', { listado: 1 });
+      pacientesTotalesCache = { ...pacientesTotalesCache, ...(r.pacientesTotales || {}) };
+      renderPacientesTotalesTabla();
+    } catch (err) {
+      if (err.message !== 'unauthorized') document.querySelector('#dash-pacientes-tabla tbody').innerHTML = '<tr><td colspan="5">No se pudo cargar el listado. Volvé a intentarlo.</td></tr>';
+    }
   });
 
   // ---------- Pacientes sin ficha asignada ----------
@@ -1503,6 +1546,8 @@
   document.getElementById('mon-detalle-btn').addEventListener('click', () => {
     document.getElementById('mon-detalle').classList.toggle('hidden');
   });
+  // Ejecutar el autologin cuando ya están inicializadas las variables del panel.
+  if (adminKey) arrancar();
 </script>
 <script>
   window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };

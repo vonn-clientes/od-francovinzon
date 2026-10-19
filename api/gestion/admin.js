@@ -13,7 +13,7 @@ import {
 } from '../../lib/googleCalendar.js';
 import { getPacientesDriveClient, getPacientesSheetsClient } from '../../lib/googleOAuthPacientes.js';
 import {
-  PACIENTES_FOLDER_ID, SHEET_NAME, parsearNombreArchivo, rangoMovimientos, rangoPrestacionesObraSocial,
+  PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, SHEET_NAME, parsearNombreArchivo, rangoMovimientos, rangoPrestacionesObraSocial,
 } from '../../lib/pacientesSheet.js';
 import { avisarFallo } from '../../lib/alertas.js';
 import { conReintentos } from '../../lib/retry.js';
@@ -1098,21 +1098,52 @@ function resumirPacientesTotales(pacientes = {}) {
 // Son las filas de "Pacientes consolidados" sin fichaId. Se lee en vivo (sin snapshot).
 async function getSinFicha(req, res) {
   const filas = await listarPacientesConsolidados();
-  const sug = sugerenciasPorNombre(filas);
-  const nombreFicha = new Map(filas.filter((f) => f.fichaId).map((f) => [f.fichaId, `${f.nombre} ${f.apellido}`.trim()]));
+  // El índice consolidado puede estar incompleto: las fichas antiguas no siempre
+  // pasaron por una edición que las sincronice. Completar sus identidades desde los
+  // nombres de archivo de Drive (sin leer las hojas) para no ocultar coincidencias.
+  let archivos = [];
+  try {
+    const drive = getPacientesDriveClient();
+    let pageToken;
+    do {
+      const { data } = await conReintentos(() => drive.files.list({
+        q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
+        fields: 'files(id, name), nextPageToken', pageSize: 250, pageToken,
+      }));
+      archivos = archivos.concat(data.files || []);
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+  } catch (err) {
+    console.warn('[admin.js] no se pudo completar el índice de fichas desde Drive:', err?.message || err);
+  }
+  const fichasPorId = new Map(filas.filter((f) => f.fichaId).map((f) => [f.fichaId, f]));
+  for (const archivo of archivos) {
+    if (archivo.id === FICHA_TEMPLATE_ID || /^⭐/.test(archivo.name) || /\(no tocar\)\s*$/i.test(archivo.name)) continue;
+    const identidad = parsearNombreArchivo(archivo.name);
+    const ficha = fichasPorId.get(archivo.id) || { fichaId: archivo.id };
+    fichasPorId.set(archivo.id, {
+      ...ficha,
+      nombre: ficha.nombre || identidad.nombre,
+      apellido: ficha.apellido || identidad.apellido,
+      dni: ficha.dni || identidad.dni,
+    });
+  }
+  const filasConFichasDeDrive = [...filas, ...fichasPorId.values()];
+  const sug = sugerenciasPorNombre(filasConFichasDeDrive);
+  const nombreFicha = new Map([...fichasPorId].map(([id, f]) => [id, `${f.nombre} ${f.apellido}`.trim()]));
   const sinFicha = filas
     .filter((f) => !f.fichaId)
     .map((f) => ({
       sugerida: sug.has(f.fila) ? { id: sug.get(f.fila), nombre: nombreFicha.get(sug.get(f.fila)) } : null,
-      candidatas: candidatasParaFicha(f, filas),
+      candidatas: candidatasParaFicha(f, filasConFichasDeDrive),
       fila: f.fila, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni, telefono: f.telefono,
       turnosPasados: f.turnosPasados || 0, ultimaVisita: f.ultimaVisita || '',
     }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   const vistos = new Set();
-  const fichas = filas
-    .filter((f) => f.fichaId && !vistos.has(f.fichaId) && vistos.add(f.fichaId))
-    .map((f) => ({ id: f.fichaId, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni }))
+  const fichas = [...fichasPorId]
+    .filter(([id]) => !vistos.has(id) && vistos.add(id))
+    .map(([id, f]) => ({ id, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   res.status(200).json({ success: true, sinFicha, fichas: [] });
 }

@@ -1,7 +1,6 @@
 import { getCalendarClient, getDisponibilidadMes, getHorariosLibresDia } from '../lib/googleCalendar.js';
 import { avisarFallo } from '../lib/alertas.js';
 import { obtenerHorariosConfig, obtenerReservaOnlinePausada } from '../lib/adminConfig.js';
-import { obtenerOpinionesGoogle } from '../lib/googleReviews.js';
 
 // Fusiona lo que antes eran disponibilidad-mes.js + horarios-dia.js (mismo patrón de
 // "modo" ya usado en api/gestion/buscar.js) para no sumar un archivo nuevo — ver
@@ -12,13 +11,9 @@ import { obtenerOpinionesGoogle } from '../lib/googleReviews.js';
 // ?modo=estado — GET: { pausada: bool } del interruptor de reserva online (ver el
 // pedido, 2026-08-14). Vive acá (no en api/gestion/admin.js) porque /turnos y la home
 // son páginas públicas sin ADMIN_KEY/GESTION_KEY, y este archivo ya es público.
-// ?modo=opiniones — GET: reseñas y calificación vivas del perfil de Google. Se agrega
-// acá para respetar el límite de 12 funciones serverless del plan Hobby.
 export default async function handler(req, res) {
   const esModoDia = req.query.modo === 'dia';
   const esModoEstado = req.query.modo === 'estado';
-  const esModoOpiniones = req.query.modo === 'opiniones';
-  if (esModoOpiniones) return obtenerOpinionesGoogle(req, res);
   try {
     if (esModoEstado) {
       const pausada = await obtenerReservaOnlinePausada();

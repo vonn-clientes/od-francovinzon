@@ -236,6 +236,9 @@
   }
 
   .loading-note { text-align: center; color: var(--muted); font-size: 13px; padding: 30px 0; }
+  .ficha-load-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: var(--white); font-size: 13px; }
+  .ficha-load-error[hidden] { display: none; }
+  .ficha-load-error button { flex-shrink: 0; padding: 8px 12px; border: 1px solid var(--navy); border-radius: 9px; background: var(--navy); color: white; font-weight: 600; }
 
   #toast-container { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 999; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
   .toast { background: var(--navy); color: var(--white); padding: 11px 20px; border-radius: 100px; font-size: 13px; font-weight: 600; box-shadow: 0 8px 24px rgba(30,58,95,.28); opacity: 0; transform: translateY(-10px); transition: opacity .2s ease, transform .2s ease; }
@@ -518,6 +521,10 @@
         <div class="dni" id="f-dni-header"></div>
       </div>
       <div class="autosave-status" id="autosave-status" role="status" aria-live="polite" aria-atomic="true"></div>
+    </div>
+    <div class="ficha-load-error" id="ficha-load-error" role="alert" hidden>
+      <span id="ficha-load-error-text">No se pudo cargar la ficha.</span>
+      <button type="button" id="ficha-retry">Reintentar</button>
     </div>
     <button class="btn-obra-social" id="btn-obra-social">🏥 Estado de prestación obra social</button>
     <button class="btn-obra-social" id="btn-fotos" style="margin-left:10px;">📷 Fotos</button>
@@ -816,9 +823,9 @@
     detenerEscaneoDuplicados();
   }
 
-  async function apiGet(params) {
+  async function apiGet(params, { signal } = {}) {
     const qs = new URLSearchParams({ ...params, key: gestionKey }).toString();
-    const r = await fetch(`/api/gestion/pacientes?${qs}`);
+    const r = await fetch(`/api/gestion/pacientes?${qs}`, signal ? { signal } : undefined);
     if (r.status === 401) { onUnauthorized(); throw new Error('unauthorized'); }
     return r.json();
   }
@@ -1526,8 +1533,23 @@
   const vistaObraSocial = document.getElementById('vista-obra-social');
   const autosaveStatus = document.getElementById('autosave-status');
   const campoSaveVersion = new Map();
+  let fichaCargaToken = 0;
+  let fichaCargaController = null;
+  let fichaIdSolicitada = null;
+
+  function bloquearEdicionFicha(bloquear) {
+    document.querySelectorAll('#vista-ficha input, #vista-ficha select, #vista-ficha textarea, #vista-ficha button:not(#volver-lista):not(#ficha-retry)')
+      .forEach((el) => { el.disabled = bloquear; });
+  }
+
+  document.getElementById('ficha-retry').addEventListener('click', () => {
+    if (fichaIdSolicitada) abrirFicha(fichaIdSolicitada);
+  });
 
   document.getElementById('volver-lista').addEventListener('click', () => {
+    fichaCargaToken++;
+    fichaCargaController?.abort();
+    fichaCargaController = null;
     limpiarFormulariosAlNavegar();
     detenerPolling();
     cambiarVista(vistaLista, vistaFicha);
@@ -1577,16 +1599,36 @@
   }
 
   async function abrirFicha(id) {
+    fichaCargaController?.abort();
+    const token = ++fichaCargaToken;
+    const controller = new AbortController();
+    fichaCargaController = controller;
+    fichaIdSolicitada = id;
+    const timeout = setTimeout(() => controller.abort(), 30000);
     limpiarFormulariosAlNavegar(); // el form del paciente anterior no puede seguir vivo
     cambiarVista(vistaFicha, vistaLista, vistaDuplicados, vistaFusion, vistaObraSocial);
     document.getElementById('f-titulo').textContent = 'Cargando…';
+    document.getElementById('ficha-load-error').hidden = true;
+    bloquearEdicionFicha(true);
     try {
-      fichaActual = await apiGet({ modo: 'ficha', id });
+      const datos = await apiGet({ modo: 'ficha', id }, { signal: controller.signal });
+      if (token !== fichaCargaToken) return;
+      fichaActual = datos;
       renderFicha();
+      bloquearEdicionFicha(false);
       iniciarPolling(id);
       autocompletarTelefonoDesdeTurnos();
     } catch (e) {
-      if (e.message !== 'unauthorized') toast('No se pudo abrir la ficha.');
+      if (token !== fichaCargaToken || e.message === 'unauthorized') return;
+      document.getElementById('f-titulo').textContent = 'No se pudo cargar la ficha';
+      document.getElementById('ficha-load-error-text').textContent = e.name === 'AbortError'
+        ? 'La carga tardó más de lo esperado. Revisá la conexión y reintentá.'
+        : 'Hubo un problema al leer esta ficha. Reintentá en unos segundos.';
+      document.getElementById('ficha-load-error').hidden = false;
+      toast('No se pudo cargar la ficha.');
+    } finally {
+      clearTimeout(timeout);
+      if (token === fichaCargaToken) fichaCargaController = null;
     }
   }
 

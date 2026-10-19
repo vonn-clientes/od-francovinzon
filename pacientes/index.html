@@ -413,6 +413,10 @@
   </div>
 
   <div id="vista-lista" class="vista">
+    <div class="hoy-section hidden" id="asignar-banner" style="border:2px solid #2563eb;padding:10px;border-radius:10px;">
+      <strong id="asignar-texto"></strong>
+      <p class="hint" style="margin:4px 0 0;">Buscá la ficha y tocala para vincularla.</p>
+    </div>
     <div class="hoy-section hidden" id="hoy-section">
       <h2>Pacientes de hoy</h2>
       <div class="hoy-carril" id="hoy-carril"></div>
@@ -973,7 +977,10 @@
       </div>
     `).join('');
     patientListEl.querySelectorAll('.patient-row').forEach((row) => {
-      row.addEventListener('click', () => abrirFicha(row.dataset.id));
+      row.addEventListener('click', () => {
+        if (asignarFila) return asignarATurno(row.dataset.id, row.querySelector('.patient-nombre').textContent);
+        abrirFicha(row.dataset.id);
+      });
     });
     if (resaltarIdPendiente) {
       const fila = patientListEl.querySelector(`.patient-row[data-id="${resaltarIdPendiente}"]`);
@@ -986,6 +993,27 @@
     }
   }
   searchInput.addEventListener('input', renderLista);
+
+  // Modo "asignar": /pacientes?asignar=FILA&nombre=... (viene del admin). Tocar una ficha
+  // vincula a esa persona de turnos con la ficha elegida.
+  const paramsAsignar = new URLSearchParams(location.search);
+  const asignarFila = Number(paramsAsignar.get('asignar')) || 0;
+  if (asignarFila) {
+    document.getElementById('asignar-texto').textContent = `Elegí la ficha de ${paramsAsignar.get('nombre') || 'esta persona'}`;
+    document.getElementById('asignar-banner').classList.remove('hidden');
+  }
+  async function asignarATurno(fichaId, nombreFicha) {
+    if (!confirm(`¿Vincular a ${paramsAsignar.get('nombre') || 'esta persona'} con la ficha de ${nombreFicha.trim()}?`)) return;
+    try {
+      const r = await apiPost({ accion: 'asignar-turno-a-ficha', fila: asignarFila, fichaId });
+      if (r.success) {
+        alert('Listo, quedó vinculada. Podés cerrar esta pestaña y recargar el admin.');
+        location.href = '/pacientes';
+      } else {
+        alert(r.message || 'No se pudo vincular.');
+      }
+    } catch (e) { if (e.message !== 'unauthorized') alert('Error de red. Probá de nuevo.'); }
+  }
 
   function normalizar(str) {
     return (str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();

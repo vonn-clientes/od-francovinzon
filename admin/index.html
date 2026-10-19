@@ -244,9 +244,10 @@
 
         <div class="card" id="card-sin-ficha">
           <h2>Pacientes sin ficha asignada</h2>
-          <p class="hint">Personas que sacaron turno pero no están vinculadas a ninguna ficha. Elegí la ficha y tocá Asignar.</p>
+          <p class="hint">Personas que sacaron turno pero no están vinculadas a ninguna ficha. Si el nombre coincide con una ficha, un toque la asigna. Si no, "Elegir ficha" abre /pacientes con el buscador.</p>
+          <button class="btn btn-primary hidden" id="sf-lote" style="margin-bottom:8px;"></button>
           <div id="sf-msg" class="msg"></div>
-          <div class="table-wrap"><table id="sf-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Ficha</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="sf-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Coincide por nombre</th><th></th></tr></thead><tbody></tbody></table></div>
         </div>
 
         <div class="card" id="card-publico">
@@ -902,43 +903,66 @@
   });
 
   // ---------- Pacientes sin ficha asignada ----------
-  let sinFichaDatos = null;
   async function cargarSinFicha() {
     const tbody = document.querySelector('#sf-tabla tbody');
+    const loteBtn = document.getElementById('sf-lote');
     tbody.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
     try {
       const r = await apiGet('sin-ficha');
       if (!r.success) throw new Error('x');
-      sinFichaDatos = r;
-      const opciones = '<option value="">Elegir ficha…</option>' + r.fichas.map((f) =>
-        `<option value="${escapeHtmlAdmin(f.id)}">${escapeHtmlAdmin(f.nombre)}${f.dni ? ' · ' + escapeHtmlAdmin(f.dni) : ''}</option>`).join('');
+      const conSug = r.sinFicha.filter((p) => p.sugerida).length;
+      loteBtn.textContent = `Asignar las ${conSug} coincidencias exactas por nombre`;
+      loteBtn.classList.toggle('hidden', !conSug);
       tbody.innerHTML = r.sinFicha.map((p) => `
         <tr>
           <td>${escapeHtmlAdmin(p.nombre)}</td>
           <td>${escapeHtmlAdmin(p.dni || '')}</td>
           <td>${escapeHtmlAdmin(p.telefono || '')}</td>
-          <td><select data-sf-sel="${p.fila}">${opciones}</select></td>
-          <td><button class="btn btn-outline" data-sf-asignar="${p.fila}">Asignar</button></td>
+          <td>${p.sugerida ? `<button class="btn btn-outline" data-sf-asignar="${p.fila}" data-sf-ficha="${escapeHtmlAdmin(p.sugerida.id)}">Es ${escapeHtmlAdmin(p.sugerida.nombre)}</button>` : ''}</td>
+          <td><button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td>
         </tr>`).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
     } catch (e) {
       if (e.message !== 'unauthorized') tbody.innerHTML = '<tr><td colspan="5">No se pudo cargar.</td></tr>';
     }
   }
   document.querySelector('#sf-tabla').addEventListener('click', async (ev) => {
+    const elegir = ev.target.closest('[data-sf-elegir]');
+    if (elegir) {
+      // Abre la interfaz completa de /pacientes en modo "elegir ficha" (copia la sesión).
+      try { if (!sessionStorage.getItem('gestionKey')) sessionStorage.setItem('gestionKey', adminKey); } catch (e) { /* sin storage */ }
+      window.open(`/pacientes?asignar=${elegir.dataset.sfElegir}&nombre=${encodeURIComponent(elegir.dataset.sfNombre)}`, '_blank');
+      return;
+    }
     const btn = ev.target.closest('[data-sf-asignar]');
     if (!btn) return;
-    const fila = Number(btn.dataset.sfAsignar);
-    const fichaId = document.querySelector(`[data-sf-sel="${fila}"]`).value;
-    if (!fichaId) { setMsg('sf-msg', 'Elegí una ficha primero.', 'error'); return; }
     btn.disabled = true;
     setMsg('sf-msg', '', '');
     try {
-      const r = await apiPost('asignar-ficha', { fila, fichaId });
+      const r = await apiPost('asignar-ficha', { fila: Number(btn.dataset.sfAsignar), fichaId: btn.dataset.sfFicha });
       if (r.success) { setMsg('sf-msg', 'Asignada.', 'ok'); await cargarSinFicha(); }
       else { setMsg('sf-msg', r.error || 'No se pudo asignar.', 'error'); btn.disabled = false; }
     } catch (e) {
       if (e.message !== 'unauthorized') { setMsg('sf-msg', 'Error de red. Probá de nuevo.', 'error'); btn.disabled = false; }
     }
+  });
+  document.getElementById('sf-lote').addEventListener('click', async () => {
+    const btn = document.getElementById('sf-lote');
+    btn.disabled = true;
+    let total = 0;
+    try {
+      for (let i = 0; i < 20; i++) {
+        setMsg('sf-msg', `Asignando… ${total} hechas`, '');
+        const r = await apiPost('asignar-ficha', { lote: true });
+        if (!r.success) { setMsg('sf-msg', r.error || 'No se pudo asignar.', 'error'); break; }
+        total += r.asignadas;
+        if (!r.restantes || !r.asignadas) break;
+      }
+      setMsg('sf-msg', `Listo: ${total} asignadas.`, 'ok');
+    } catch (e) {
+      if (e.message !== 'unauthorized') setMsg('sf-msg', `Error de red (van ${total}). Probá de nuevo.`, 'error');
+    }
+    btn.disabled = false;
+    await cargarSinFicha();
   });
 
   // ---------- Reserva online ----------

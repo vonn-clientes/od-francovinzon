@@ -387,7 +387,7 @@
     const texto=document.createElement('blockquote');texto.textContent='“'+review.text+'”';fig.appendChild(texto);
     const stars=document.createElement('span');stars.className='stars';stars.setAttribute('role','img');stars.setAttribute('aria-label',review.rating+' estrellas de 5');stars.style.setProperty('--rating-fill',Math.max(0,Math.min(100,Number(review.rating)/5*100))+'%');stars.innerHTML='<span class="stars-glyph" aria-hidden="true">★★★★★</span>';fig.appendChild(stars);
     const caption=document.createElement('figcaption');
-    const photoUrl=fotoSegura(review.authorPhoto);if(photoUrl){const photo=document.createElement('img');photo.className='review-author-photo';photo.src=photoUrl;photo.alt='';photo.width=36;photo.height=36;photo.loading='lazy';photo.referrerPolicy='no-referrer';caption.appendChild(photo)}
+    const photoUrl=fotoSegura(review.authorPhoto);if(photoUrl){const photo=document.createElement('img');photo.className='review-author-photo';photo.src=photoUrl;photo.alt='';photo.width=36;photo.height=36;photo.loading='lazy';caption.appendChild(photo)}
     const authorUrl=urlSegura(review.authorUri);const author=authorUrl?document.createElement('a'):document.createElement('span');author.textContent=review.author;if(authorUrl){author.href=authorUrl;author.target='_blank';author.rel='noopener'}caption.appendChild(author);
     if(review.published){const date=document.createElement('span');date.textContent=' · '+review.published;caption.appendChild(date)}
     if(review.translated){const translated=document.createElement('span');translated.className='review-translation';translated.textContent=' · Traducida por Google';caption.appendChild(translated)}

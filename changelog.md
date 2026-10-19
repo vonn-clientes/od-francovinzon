@@ -1,6 +1,17 @@
 # Changelog
 
+## 2026-10-19 — Selector de fichas y autocompletado de turnos
+
+- Corregido el orden del modal “Elegir ficha” en `/admin`: sus controles ahora existen antes de registrar eventos, así que el selector abre; fichas seleccionables por teclado, cierre con Escape y foco devuelto al botón que lo abrió.
+- El listado de fichas valida la respuesta del servidor y permite reintentar si falla la carga.
+- Al vincular una persona con una ficha, el vínculo del registro central queda disponible para autocompletar datos en próximos turnos.
+- En `/gestion`, el autocompletado ahora ofrece completar DNI aunque el teléfono ya esté cargado (y viceversa), y solo rellena campos vacíos tras confirmación.
+
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
+
+## 2026-10-19 — Ficha de paciente más simple y guardado más confiable
+
+Dentro de una ficha se oculta la búsqueda global y queda a mano «Volver a la lista». Se quitó el botón separado «Carga histórica»: cualquier movimiento permite elegir la fecha que corresponde. Se estilizaron los selectores ARS/USD y se apilaron los importes en pantallas angostas para que los campos sigan siendo cómodos. El autosave ya no deja el estado local como guardado cuando la API falla; el error permite reintentar al salir del campo. Se validan fechas de nacimiento reales y se añadieron teclados adecuados y anuncio accesible del estado de guardado.
 
 ## 2026-10-19 — Reparación de formularios de movimientos en /pacientes
 

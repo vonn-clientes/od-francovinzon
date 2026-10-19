@@ -2681,8 +2681,8 @@
     const nombreCompleto = `${document.getElementById(nombreId).value.trim()} ${document.getElementById(apellidoId).value.trim()}`.trim();
     const telInput = document.getElementById(telefonoId);
     const dniInput = dniId ? document.getElementById(dniId) : null;
-    const yaCompletos = () => telInput.value.trim() || (dniInput && dniInput.value.trim());
-    if (!nombreCompleto || yaCompletos()) return;
+    const faltanDatos = () => !telInput.value.trim() || (dniInput && !dniInput.value.trim());
+    if (!nombreCompleto || !faltanDatos()) return;
 
     // Una sola consulta contra la planilla "Pacientes consolidados" (ver el pedido,
     // 2026-08-14) — ya trae teléfono Y DNI juntos, resueltos de antemano (fichas +
@@ -2697,25 +2697,30 @@
     } catch {
       return;
     }
-    if (!data.telefono || yaCompletos()) return;
-    const dniFinal = data.dni || null;
+    if (!data || (!data.telefono && !data.dni)) return;
+    const telefonoFinal = !telInput.value.trim() ? (data.telefono || null) : null;
+    const dniFinal = dniInput && !dniInput.value.trim() ? (data.dni || null) : null;
+    if (!telefonoFinal && !dniFinal) return;
 
     // " · " en vez de salto de línea: #confirm-msg es un <p> de texto plano sin
     // white-space:pre-line (lo comparte con otros diálogos de confirmación), así que un
     // "\n" se vería colapsado en un solo espacio de cualquier forma.
     const telefonoParaMostrar = data.telefonoVerificado ? `+${data.telefono}` : data.telefono;
-    const mensaje = dniInput
-      ? `Teléfono: ${telefonoParaMostrar} · DNI: ${dniFinal || 'no encontrado'}`
-      : `Teléfono: ${telefonoParaMostrar}`;
+    const mensaje = [
+      telefonoFinal ? `Teléfono: ${telefonoParaMostrar}` : '',
+      dniFinal ? `DNI: ${dniFinal}` : '',
+    ].filter(Boolean).join(' · ');
     const confirmado = await confirmDialog({
       title: '¿Estos datos son correctos?',
       message: mensaje,
       confirmLabel: 'Sí',
       cancelLabel: 'No',
     });
-    if (!confirmado || yaCompletos()) return;
-    setNumeroAutocompletado(iti, data.telefono, data.telefonoVerificado);
-    if (dniInput && dniFinal) dniInput.value = dniFinal;
+    if (!confirmado) return;
+    // Completar únicamente los campos que siguen vacíos; preservar lo que la secretaria
+    // haya cargado mientras el diálogo estaba abierto.
+    if (telefonoFinal && !telInput.value.trim()) setNumeroAutocompletado(iti, data.telefono, data.telefonoVerificado);
+    if (dniFinal && dniInput && !dniInput.value.trim()) dniInput.value = dniFinal;
   }
 
   // ---------- Dropdown de autocompletado de pacientes mientras se escribe ----------

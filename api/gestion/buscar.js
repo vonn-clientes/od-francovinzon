@@ -130,12 +130,14 @@ async function buscarTelefono(req, res) {
     if (nombre.length < 2) return res.status(200).json({ telefono: null, dni: null });
 
     const match = await buscarPacienteConsolidadoPorNombre(nombre);
-    if (!match || !match.telefono) return res.status(200).json({ telefono: null, dni: null });
+    if (!match) return res.status(200).json({ telefono: null, dni: null });
 
     // Nunca "verificado" acá (esa marca es específica de intl-tel-input en /gestion/
     // /turnos) — se pasa el teléfono tal cual, dejando que la librería lo interprete
     // con Argentina como país por default, mismo criterio que un número legado.
-    res.status(200).json({ telefono: match.telefono, telefonoVerificado: false, dni: match.dni || null });
+    // Devolver también el DNI aunque falte teléfono: una ficha ya vinculada puede
+    // completar solo el dato ausente en el alta de un turno.
+    res.status(200).json({ telefono: match.telefono || null, telefonoVerificado: false, dni: match.dni || null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ telefono: null, dni: null });

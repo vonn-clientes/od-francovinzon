@@ -138,6 +138,19 @@
   .patient-row:last-child { border-bottom: none; }
   .patient-row .nombre { font-weight: 600; }
   .patient-row .dni { color: var(--muted); font-size: 12px; }
+
+  .sf-modal { position: fixed; inset: 0; background: rgba(30,58,95,.45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 1000; }
+  .sf-modal.hidden { display: none; }
+  .sf-box { background: var(--white); border-radius: 18px; width: 100%; max-width: 520px; max-height: 85vh; display: flex; flex-direction: column; padding: 20px; box-shadow: 0 18px 50px rgba(30,58,95,.3); }
+  .sf-box h3 { margin: 0 0 4px; font-size: 18px; }
+  .sf-box input[type=search] { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1.5px solid #E8E4D8; margin: 10px 0; font-size: 15px; box-sizing: border-box; }
+  .sf-lista { overflow-y: auto; flex: 1; min-height: 160px; border: 1px solid #EFEBE0; border-radius: 12px; }
+  .sf-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #F3F0E6; }
+  .sf-item:last-child { border-bottom: none; }
+  .sf-item small { display: block; color: #7a7566; }
+  .sf-item.sel { background: #FBF3E0; outline: 2px solid #D4A24C; outline-offset: -2px; }
+  .sf-acciones { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .sf-ok { color: #1f7a45; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -244,10 +257,10 @@
 
         <div class="card" id="card-sin-ficha">
           <h2>Pacientes sin ficha asignada</h2>
-          <p class="hint">Personas que sacaron turno pero no están vinculadas a ninguna ficha. Si el nombre coincide con una ficha, un toque la asigna. Si no, "Elegir ficha" abre /pacientes con el buscador.</p>
+          <p class="hint">Personas que sacaron turno pero no están vinculadas a ninguna ficha. Si el nombre coincide con una ficha, un toque la asigna. Si no, "Elegir ficha" abre un buscador.</p>
           <button class="btn btn-primary hidden" id="sf-lote" style="margin-bottom:8px;"></button>
           <div id="sf-msg" class="msg"></div>
-          <div class="table-wrap"><table id="sf-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Coincide por nombre</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="sf-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Ficha</th><th></th></tr></thead><tbody></tbody></table></div>
         </div>
 
         <div class="card" id="card-publico">
@@ -903,34 +916,119 @@
   });
 
   // ---------- Pacientes sin ficha asignada ----------
-  async function cargarSinFicha() {
+  let sinFichaLista = [];       // filas sin ficha, tal cual vienen del servidor
+  const asignadasAhora = new Map(); // fila -> { id, nombre } (se ven un rato, con "Cancelar asignación")
+  let fichasTodas = null;       // fichas de /pacientes (para el pop-up)
+  let modalFila = 0, modalFichaId = '', modalNombrePersona = '';
+
+  function renderSinFicha() {
     const tbody = document.querySelector('#sf-tabla tbody');
     const loteBtn = document.getElementById('sf-lote');
+    const pendientes = sinFichaLista.filter((p) => !asignadasAhora.has(p.fila));
+    const conSug = pendientes.filter((p) => p.sugerida).length;
+    loteBtn.textContent = `Asignar las ${conSug} coincidencias exactas por nombre`;
+    loteBtn.classList.toggle('hidden', !conSug);
+    tbody.innerHTML = sinFichaLista.map((p) => {
+      const as = asignadasAhora.get(p.fila);
+      if (as) {
+        return `<tr>
+          <td>${escapeHtmlAdmin(p.nombre)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
+          <td class="sf-ok" colspan="1">✓ Asignado a ${escapeHtmlAdmin(as.nombre)}</td>
+          <td><button class="btn btn-outline" data-sf-deshacer="${p.fila}">Cancelar asignación</button></td></tr>`;
+      }
+      return `<tr>
+          <td>${escapeHtmlAdmin(p.nombre)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
+          <td>${p.sugerida ? `<button class="btn btn-outline" data-sf-asignar="${p.fila}" data-sf-ficha="${escapeHtmlAdmin(p.sugerida.id)}" data-sf-nombre-ficha="${escapeHtmlAdmin(p.sugerida.nombre)}">Es ${escapeHtmlAdmin(p.sugerida.nombre)}</button>` : ''}</td>
+          <td><button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td></tr>`;
+    }).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
+  }
+  async function cargarSinFicha() {
+    const tbody = document.querySelector('#sf-tabla tbody');
     tbody.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
     try {
       const r = await apiGet('sin-ficha');
       if (!r.success) throw new Error('x');
-      const conSug = r.sinFicha.filter((p) => p.sugerida).length;
-      loteBtn.textContent = `Asignar las ${conSug} coincidencias exactas por nombre`;
-      loteBtn.classList.toggle('hidden', !conSug);
-      tbody.innerHTML = r.sinFicha.map((p) => `
-        <tr>
-          <td>${escapeHtmlAdmin(p.nombre)}</td>
-          <td>${escapeHtmlAdmin(p.dni || '')}</td>
-          <td>${escapeHtmlAdmin(p.telefono || '')}</td>
-          <td>${p.sugerida ? `<button class="btn btn-outline" data-sf-asignar="${p.fila}" data-sf-ficha="${escapeHtmlAdmin(p.sugerida.id)}">Es ${escapeHtmlAdmin(p.sugerida.nombre)}</button>` : ''}</td>
-          <td><button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td>
-        </tr>`).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
+      sinFichaLista = r.sinFicha;
+      asignadasAhora.clear();
+      renderSinFicha();
     } catch (e) {
       if (e.message !== 'unauthorized') tbody.innerHTML = '<tr><td colspan="5">No se pudo cargar.</td></tr>';
     }
   }
+
+  // ---- Pop-up para elegir la ficha ----
+  const normSf = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  function pintarFichasModal() {
+    const q = normSf(document.getElementById('sf-modal-buscar').value.trim());
+    const lista = document.getElementById('sf-modal-lista');
+    if (!fichasTodas) { lista.innerHTML = '<div class="sf-item">Cargando fichas…</div>'; return; }
+    const filtradas = (q ? fichasTodas.filter((f) => normSf(`${f.nombre} ${f.apellido} ${f.dni}`).includes(q)) : fichasTodas).slice(0, 80);
+    lista.innerHTML = filtradas.map((f) => `
+      <div class="sf-item ${f.id === modalFichaId ? 'sel' : ''}" data-id="${escapeHtmlAdmin(f.id)}">
+        ${escapeHtmlAdmin(`${f.nombre} ${f.apellido}`.trim())}<small>${f.dni ? 'DNI ' + escapeHtmlAdmin(f.dni) : 'Sin DNI'}</small>
+      </div>`).join('') || '<div class="sf-item">Sin resultados.</div>';
+  }
+  async function abrirModalFicha(fila, nombre) {
+    modalFila = fila; modalFichaId = ''; modalNombrePersona = nombre;
+    document.getElementById('sf-modal-titulo').textContent = `Elegir la ficha de ${nombre}`;
+    document.getElementById('sf-modal-buscar').value = '';
+    document.getElementById('sf-modal-asignar').disabled = true;
+    document.getElementById('sf-modal-msg').textContent = '';
+    document.getElementById('sf-modal').classList.remove('hidden');
+    pintarFichasModal();
+    document.getElementById('sf-modal-buscar').focus();
+    if (!fichasTodas) {
+      try {
+        const r = await fetch(`/api/gestion/pacientes?modo=listar&key=${encodeURIComponent(adminKey)}`);
+        fichasTodas = await r.json();
+      } catch (e) { fichasTodas = []; setMsg('sf-modal-msg', 'No se pudieron cargar las fichas.', 'error'); }
+      pintarFichasModal();
+    }
+  }
+  function cerrarModalFicha() { document.getElementById('sf-modal').classList.add('hidden'); }
+  document.getElementById('sf-modal-buscar').addEventListener('input', pintarFichasModal);
+  document.getElementById('sf-modal-lista').addEventListener('click', (ev) => {
+    const it = ev.target.closest('.sf-item[data-id]');
+    if (!it) return;
+    modalFichaId = it.dataset.id;
+    document.getElementById('sf-modal-asignar').disabled = false;
+    pintarFichasModal();
+  });
+  document.getElementById('sf-modal-cancelar').addEventListener('click', cerrarModalFicha);
+  document.getElementById('sf-modal').addEventListener('click', (ev) => { if (ev.target.id === 'sf-modal') cerrarModalFicha(); });
+  document.getElementById('sf-modal-asignar').addEventListener('click', async () => {
+    const btn = document.getElementById('sf-modal-asignar');
+    const ficha = (fichasTodas || []).find((f) => f.id === modalFichaId);
+    if (!ficha) return;
+    btn.disabled = true;
+    setMsg('sf-modal-msg', 'Asignando…', '');
+    try {
+      const r = await apiPost('asignar-ficha', { fila: modalFila, fichaId: modalFichaId });
+      if (r.success) {
+        asignadasAhora.set(modalFila, { id: ficha.id, nombre: `${ficha.nombre} ${ficha.apellido}`.trim() });
+        cerrarModalFicha();
+        renderSinFicha();
+        setMsg('sf-msg', 'Asignada. Si te equivocaste, tocá "Cancelar asignación".', 'ok');
+      } else {
+        setMsg('sf-modal-msg', r.error || 'No se pudo asignar.', 'error');
+        btn.disabled = false;
+      }
+    } catch (e) {
+      if (e.message !== 'unauthorized') { setMsg('sf-modal-msg', 'Error de red. Probá de nuevo.', 'error'); btn.disabled = false; }
+    }
+  });
+
   document.querySelector('#sf-tabla').addEventListener('click', async (ev) => {
     const elegir = ev.target.closest('[data-sf-elegir]');
-    if (elegir) {
-      // Abre la interfaz completa de /pacientes en modo "elegir ficha" (copia la sesión).
-      try { if (!sessionStorage.getItem('gestionKey')) sessionStorage.setItem('gestionKey', adminKey); } catch (e) { /* sin storage */ }
-      window.open(`/pacientes?asignar=${elegir.dataset.sfElegir}&nombre=${encodeURIComponent(elegir.dataset.sfNombre)}`, '_blank');
+    if (elegir) { abrirModalFicha(Number(elegir.dataset.sfElegir), elegir.dataset.sfNombre); return; }
+    const deshacer = ev.target.closest('[data-sf-deshacer]');
+    if (deshacer) {
+      deshacer.disabled = true;
+      try {
+        const r = await apiPost('desasignar-ficha', { fila: Number(deshacer.dataset.sfDeshacer) });
+        if (r.success) { asignadasAhora.delete(Number(deshacer.dataset.sfDeshacer)); renderSinFicha(); setMsg('sf-msg', 'Asignación cancelada.', 'ok'); }
+        else { setMsg('sf-msg', r.error || 'No se pudo cancelar.', 'error'); deshacer.disabled = false; }
+      } catch (e) { if (e.message !== 'unauthorized') { setMsg('sf-msg', 'Error de red.', 'error'); deshacer.disabled = false; } }
       return;
     }
     const btn = ev.target.closest('[data-sf-asignar]');
@@ -938,8 +1036,9 @@
     btn.disabled = true;
     setMsg('sf-msg', '', '');
     try {
-      const r = await apiPost('asignar-ficha', { fila: Number(btn.dataset.sfAsignar), fichaId: btn.dataset.sfFicha });
-      if (r.success) { setMsg('sf-msg', 'Asignada.', 'ok'); await cargarSinFicha(); }
+      const fila = Number(btn.dataset.sfAsignar);
+      const r = await apiPost('asignar-ficha', { fila, fichaId: btn.dataset.sfFicha });
+      if (r.success) { asignadasAhora.set(fila, { id: btn.dataset.sfFicha, nombre: btn.dataset.sfNombreFicha }); renderSinFicha(); }
       else { setMsg('sf-msg', r.error || 'No se pudo asignar.', 'error'); btn.disabled = false; }
     } catch (e) {
       if (e.message !== 'unauthorized') { setMsg('sf-msg', 'Error de red. Probá de nuevo.', 'error'); btn.disabled = false; }
@@ -1358,6 +1457,20 @@
   window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
 </script>
 <script defer src="/_vercel/insights/script.js"></script>
+
+<div class="sf-modal hidden" id="sf-modal" role="dialog" aria-modal="true">
+  <div class="sf-box">
+    <h3 id="sf-modal-titulo">Elegir ficha</h3>
+    <p class="hint" style="margin:0;">Buscá por nombre, apellido o DNI y tocá la ficha.</p>
+    <input type="search" id="sf-modal-buscar" placeholder="Buscar paciente…" autocomplete="off">
+    <div class="sf-lista" id="sf-modal-lista"></div>
+    <div id="sf-modal-msg" class="msg"></div>
+    <div class="sf-acciones">
+      <button class="btn btn-outline" id="sf-modal-cancelar">Cancelar</button>
+      <button class="btn btn-primary" id="sf-modal-asignar" disabled>Asignar</button>
+    </div>
+  </div>
+</div>
 <script>
   window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
 </script>

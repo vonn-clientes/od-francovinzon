@@ -417,7 +417,7 @@ function celdaTextoLimpia(valor) {
 // ArgentinaDatos (sin auth), mismo origen que usa el admin. Se cachea 6 h en memoria.
 let cacheDolarBlue = null; // { lista, ts }
 async function historicoDolarBlue() {
-  if (cacheDolarBlue && Date.now() - cacheDolarBlue.ts < 6 * 60 * 60 * 1000) return cacheDolarBlue.lista;
+  if (cacheDolarBlue && Date.now() - cacheDolarBlue.ts < 10 * 60 * 1000) return cacheDolarBlue.lista;
   const r = await fetch('https://api.argentinadatos.com/v1/cotizaciones/dolares/blue');
   if (!r.ok) throw new Error(`ArgentinaDatos respondió ${r.status}`);
   const lista = (await r.json()).filter((x) => x.fecha && x.compra > 0 && x.venta > 0).sort((a, b) => a.fecha.localeCompare(b.fecha));

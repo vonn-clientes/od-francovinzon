@@ -238,6 +238,11 @@
   .toast { background: var(--navy); color: var(--white); padding: 11px 20px; border-radius: 100px; font-size: 13px; font-weight: 600; box-shadow: 0 8px 24px rgba(30,58,95,.28); opacity: 0; transform: translateY(-10px); transition: opacity .2s ease, transform .2s ease; }
   .toast.show { opacity: 1; transform: translateY(0); }
 
+  .monto-moneda { display: flex; gap: 8px; }
+  .monto-moneda input { flex: 1; min-width: 0; }
+  .monto-moneda select { width: 128px; flex-shrink: 0; }
+  .dolar-box { background: var(--white); border: 1.5px solid var(--gold); border-radius: 14px; padding: 10px 12px; margin: 4px 0 10px; }
+  .dolar-linea { font-size: 12.5px; color: var(--navy-soft); margin-bottom: 8px; }
   .confirm-overlay { position: fixed; inset: 0; background: rgba(30,58,95,.35); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 998; opacity: 0; transition: opacity .18s ease; }
   .confirm-overlay.show { opacity: 1; }
   .confirm-box { background: var(--white); border-radius: 20px; padding: 24px 22px; max-width: 340px; width: 100%; box-shadow: 0 20px 50px rgba(30,58,95,.25); transform: scale(0.94); transition: transform .18s ease; }
@@ -589,18 +594,14 @@
         <div class="field full"><label>Tratamiento / descripción</label><input type="text" id="mov-tratamiento" list="lista-tratamientos"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Debe (tratamiento)</label><input type="number" id="mov-debe" min="0" step="0.01"></div>
-        <div class="field"><label>Haber (pago)</label><input type="number" id="mov-haber" min="0" step="0.01"></div>
+        <div class="field"><label>Debe (tratamiento)</label><div class="monto-moneda"><input type="number" id="mov-debe" min="0" step="0.01"><select id="mov-moneda-debe" aria-label="Moneda del debe"><option value="ARS">$ Pesos</option><option value="USD">US$ Dólares</option></select></div></div>
+        <div class="field"><label>Haber (pago)</label><div class="monto-moneda"><input type="number" id="mov-haber" min="0" step="0.01"><select id="mov-moneda-haber" aria-label="Moneda del pago"><option value="ARS">$ Pesos</option><option value="USD">US$ Dólares</option></select></div></div>
       </div>
-      <a href="#" id="mov-usar-dolares" style="font-size:12px;color:var(--muted);">Usar dólares en este movimiento</a>
-      <div id="mov-dolar-wrap" class="hidden">
-        <div class="field-row">
-          <div class="field"><label>Debe en</label><select id="mov-moneda-debe"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></div>
-          <div class="field"><label>Pago en</label><select id="mov-moneda-haber"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></div>
-        </div>
+      <div id="mov-dolar-wrap" class="dolar-box hidden">
+        <div class="dolar-linea">Dólar blue hoy: compra <b id="dolar-compra">…</b> · venta <b id="dolar-venta">…</b> · promedio <b id="dolar-prom">…</b></div>
         <div class="field-row">
           <div class="field"><label>El pago cancela deuda en</label><select id="mov-aplica"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></div>
-          <div class="field hidden" id="mov-cot-wrap"><label>Dólar blue (promedio)</label><input type="number" id="mov-cotizacion" min="0" step="0.01"></div>
+          <div class="field hidden" id="mov-cot-wrap"><label>Cotización usada (editable)</label><input type="number" id="mov-cotizacion" min="0" step="0.01"></div>
         </div>
       </div>
       <div class="mov-tipo-hint" id="mov-tipo-hint"></div>
@@ -1832,23 +1833,38 @@
   const movAplica = document.getElementById('mov-aplica');
   const movCotizacion = document.getElementById('mov-cotizacion');
   const movCotWrap = document.getElementById('mov-cot-wrap');
-  const movUsarDolares = document.getElementById('mov-usar-dolares');
-  // Muestra/oculta la cotización según haga falta convertir (pago en moneda distinta a la deuda).
-  async function actualizarCotizacionMov() {
-    const necesita = !movDolarWrap.classList.contains('hidden') && movMonedaHaber.value !== movAplica.value;
-    movCotWrap.classList.toggle('hidden', !necesita);
-    if (necesita && !movCotizacion.value) {
-      const cot = cotizacionBlueHoy || await cargarDolarBlue();
-      if (cot && !movCotizacion.value) { movCotizacion.value = cot; programarAutosaveMov(); }
+  // Selectores de moneda siempre visibles. El cuadro con el dólar blue aparece cuando
+  // algo del movimiento está en dólares; la cuenta en dólares de la ficha solo se activa
+  // si algún movimiento guardado usa USD (ver cuentaEnDolares).
+  const movUsaDolares = () => movMonedaDebe.value === 'USD' || movMonedaHaber.value === 'USD' || movAplica.value === 'USD';
+  let dolarInfo = null;
+  async function actualizarDolarMov() {
+    const usa = movUsaDolares();
+    movDolarWrap.classList.toggle('hidden', !usa);
+    movCotWrap.classList.toggle('hidden', !(usa && movMonedaHaber.value !== movAplica.value));
+    if (!usa) return;
+    if (!dolarInfo) {
+      try { const r = await apiGet({ modo: 'dolar-blue' }); if (r && r.success) { dolarInfo = r; cotizacionBlueHoy = Number(r.promedio); } } catch (e) { /* editable a mano */ }
+    }
+    const f = (n) => (n ? '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'sin datos');
+    document.getElementById('dolar-compra').textContent = f(dolarInfo && dolarInfo.compra);
+    document.getElementById('dolar-venta').textContent = f(dolarInfo && dolarInfo.venta);
+    document.getElementById('dolar-prom').textContent = f(dolarInfo && dolarInfo.promedio);
+    if (!movCotWrap.classList.contains('hidden') && !movCotizacion.value && dolarInfo && dolarInfo.promedio) {
+      movCotizacion.value = dolarInfo.promedio;
+      programarAutosaveMov();
     }
   }
-  function mostrarDolaresMov(mostrar) {
-    movDolarWrap.classList.toggle('hidden', !mostrar);
-    movUsarDolares.classList.toggle('hidden', mostrar);
+  // Por defecto el pago cancela la deuda de la moneda del debe (si hay debe) o la del propio pago.
+  function sugerirAplica() {
+    movAplica.value = Number(movDebe.value) > 0 ? movMonedaDebe.value : movMonedaHaber.value;
+    movCotizacion.value = '';
+    actualizarDolarMov();
   }
-  movUsarDolares.addEventListener('click', (ev) => { ev.preventDefault(); mostrarDolaresMov(true); actualizarCotizacionMov(); });
-  movMonedaHaber.addEventListener('change', () => { movAplica.value = movMonedaHaber.value; actualizarCotizacionMov(); });
-  movAplica.addEventListener('change', () => { movCotizacion.value = ''; actualizarCotizacionMov(); });
+  movMonedaDebe.addEventListener('change', sugerirAplica);
+  movMonedaHaber.addEventListener('change', sugerirAplica);
+  movAplica.addEventListener('change', () => { movCotizacion.value = ''; actualizarDolarMov(); });
+  let movTeniaMoneda = false;
   const movMsg = document.getElementById('mov-msg');
   const movTipoHint = document.getElementById('mov-tipo-hint');
   // "Tratamiento" de movimientos pasa a Title Case (como los campos de ficha, ver
@@ -1957,8 +1973,8 @@
       movMonedaDebe.value = 'ARS'; movMonedaHaber.value = 'ARS'; movAplica.value = 'ARS'; movCotizacion.value = '';
     }
     // Fichas con dólares: el bloque ya viene abierto. Las demás lo ven como un link chico.
-    mostrarDolaresMov(cuentaEnDolares(fichaActual.movimientos) || movMonedaDebe.value === 'USD' || movMonedaHaber.value === 'USD');
-    actualizarCotizacionMov();
+    movTeniaMoneda = !!(fila && (() => { const m = fichaActual.movimientos.find((x) => x.fila === fila); return m && (m.monedaDebe || m.monedaHaber || m.aplicaA); })());
+    actualizarDolarMov();
     // Solo se muestra al cargar un movimiento NUEVO desde "Carga histórica" — al editar
     // una fila vieja ya sin fecha (protegida por el fix de primeraFilaLibre(), ver
     // decisions.md) no hace falta inventarle ninguna.
@@ -2028,10 +2044,10 @@
       ...datosDolarMov(),
     };
   }
-  // Solo se envían los campos de dólares si el bloque está visible: así las fichas que no
-  // usan dólares nunca tocan esas columnas.
+  // Fichas sin dólares nunca escriben las columnas de moneda: solo se envían si hay USD
+  // o si el movimiento ya tenía moneda guardada (para poder volverlo a pesos).
   function datosDolarMov() {
-    if (movDolarWrap.classList.contains('hidden')) return {};
+    if (!movUsaDolares() && !movTeniaMoneda) return {};
     const mHab = movMonedaHaber.value, destino = movAplica.value;
     const necesitaCot = mHab !== destino;
     return {

@@ -29,6 +29,7 @@ import { avisarFallo } from '../../lib/alertas.js';
 // documentado en lib/googleCalendar.js y decisions.md.
 import { conReintentos } from '../../lib/retry.js';
 import { isValidAdminKey } from '../../lib/adminAuth.js';
+import { formatearDniConPuntos } from '../../lib/dni.js';
 import { Readable } from 'node:stream';
 import crypto from 'node:crypto';
 import { upsertPacienteConsolidado, actualizarPacienteConsolidado, listarPacientesConsolidados, asignarFilaAFicha, PACIENTES_CONSOLIDADOS_NAME } from '../../lib/pacientesConsolidados.js';
@@ -908,7 +909,7 @@ const CAMPOS_TEXTO_CRUDO = new Set(['telefono', 'nAfiliado', 'fechaNacimiento'])
 
 async function escribirCampoEnSheet(id, campo, valor) {
   const sheets = getPacientesSheetsClient();
-  const valorFinal = CAMPOS_MAYUSCULAS.has(campo) ? aTituloCase(valor) : valor;
+  const valorFinal = campo === 'dni' ? formatearDniConPuntos(valor) : (CAMPOS_MAYUSCULAS.has(campo) ? aTituloCase(valor) : valor);
   await conReintentos(() => sheets.spreadsheets.values.update({
     spreadsheetId: id,
     range: `${SHEET_NAME}!${CAMPO_CELDA[campo]}`,

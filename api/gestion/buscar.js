@@ -4,12 +4,29 @@ import {
   isValidGestionKey, toArgDate, formatArgDay,
 } from '../../lib/googleCalendar.js';
 import { buscarPacienteConsolidadoPorNombre, buscarPacienteConsolidadoPorDni, buscarPacienteConsolidadoPorTelefono, listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
-import { normalizarDni, rangoPrestacionesObraSocial, PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, parsearNombreArchivo } from '../../lib/pacientesSheet.js';
+import { normalizarDni, rangoPrestacionesObraSocial, PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, SHEET_NAME, parsearNombreArchivo } from '../../lib/pacientesSheet.js';
 import { getPacientesSheetsClient, getPacientesDriveClient } from '../../lib/googleOAuthPacientes.js';
 import { esFeriado } from '../../lib/feriados.js';
 import { conReintentos } from '../../lib/retry.js';
 
 const MESES_RANGO = 6;
+const TTL_DNI_FICHA_TAREAS = 2 * 60 * 1000;
+const cacheDniFichaTareas = new Map();
+
+function claveNombreTarea(nombre) {
+  return normalizarTexto(nombre).replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
+}
+
+async function leerDniFichaTarea(sheets, fichaId) {
+  const previo = cacheDniFichaTareas.get(fichaId);
+  if (previo && Date.now() - previo.ts < TTL_DNI_FICHA_TAREAS) return previo.dni;
+  const { data } = await conReintentos(() => sheets.spreadsheets.values.get({
+    spreadsheetId: fichaId, range: `${SHEET_NAME}!C7`,
+  }));
+  const dni = data.values?.[0]?.[0] || '';
+  cacheDniFichaTareas.set(fichaId, { dni, ts: Date.now() });
+  return dni;
+}
 
 // Búsqueda del sidebar (por defecto), autocompletado de teléfono (?modo=telefono),
 // autocompletado de pacientes en vivo (?modo=pacientes) y la lista de tareas
@@ -332,21 +349,25 @@ async function tareas(req, res) {
     // nombre y DNI del archivo, sin leer cientos de spreadsheets.
     try {
       const drive = getPacientesDriveClient();
-      const { data } = await conReintentos(() => drive.files.list({
-        q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
-        fields: 'files(id, name)', pageSize: 1000,
-      }));
-      for (const archivo of data.files || []) {
-        if (archivo.id === FICHA_TEMPLATE_ID || /^⭐/.test(archivo.name) || /\(no tocar\)\s*$/.test(archivo.name)) continue;
-        const datos = parsearNombreArchivo(archivo.name);
-        const actual = fichasIndexadas.get(archivo.id) || {};
-        fichasIndexadas.set(archivo.id, {
-          ...actual, fichaId: archivo.id,
-          nombre: actual.nombre || datos.nombre,
-          apellido: actual.apellido || datos.apellido,
-          dni: actual.dni || datos.dni,
-        });
-      }
+      let pageToken;
+      do {
+        const { data } = await conReintentos(() => drive.files.list({
+          q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
+          fields: 'files(id, name), nextPageToken', pageSize: 250, pageToken,
+        }));
+        for (const archivo of data.files || []) {
+          if (archivo.id === FICHA_TEMPLATE_ID || /^⭐/.test(archivo.name) || /\(no tocar\)\s*$/.test(archivo.name)) continue;
+          const datos = parsearNombreArchivo(archivo.name);
+          const actual = fichasIndexadas.get(archivo.id) || {};
+          fichasIndexadas.set(archivo.id, {
+            ...actual, fichaId: archivo.id,
+            nombre: actual.nombre || datos.nombreCompleto || datos.nombre,
+            apellido: actual.apellido || (datos.nombreCompleto ? '' : datos.apellido),
+            dni: actual.dni || datos.dni,
+          });
+        }
+        pageToken = data.nextPageToken;
+      } while (pageToken);
     } catch (err) {
       console.warn('[buscar.js] no se pudo completar el cruce desde Drive:', err?.message || err);
     }
@@ -356,7 +377,7 @@ async function tareas(req, res) {
         if (!porDniFicha.has(dni)) porDniFicha.set(dni, new Map());
         porDniFicha.get(dni).set(p.fichaId, p);
       }
-      const nombre = normalizarTexto(`${p.nombre} ${p.apellido}`);
+      const nombre = claveNombreTarea(`${p.nombre} ${p.apellido}`);
       if (nombre) {
         if (!porNombreFicha.has(nombre)) porNombreFicha.set(nombre, new Map());
         porNombreFicha.get(nombre).set(p.fichaId, p);
@@ -368,9 +389,29 @@ async function tareas(req, res) {
       if (porDni?.size === 1) return [...porDni.values()][0];
       if (porDni?.size > 1) return null; // DNI duplicado: no adivinar.
       const nombre = normalizarTexto(ev.summary || '');
-      const porNombre = porNombreFicha.get(nombre);
+      const porNombre = porNombreFicha.get(claveNombreTarea(nombre));
       return porNombre?.size === 1 ? [...porNombre.values()][0] : null;
     };
+
+    // En fichas históricas el DNI puede estar en C7 aunque falte tanto en la planilla
+    // consolidada como en el nombre del archivo. Consultar solo las coincidencias
+    // únicas de turnos que generarían la tarea evita un barrido de las ~360 fichas.
+    const sheets = getPacientesSheetsClient();
+    const idsDniConsultados = new Set();
+    for (const { ev } of todos) {
+      const { start } = eventBounds(ev);
+      if (start >= limiteSinTelefono || extraerDni(ev.description)) continue;
+      const posibles = porNombreFicha.get(claveNombreTarea(ev.summary || ''));
+      if (posibles?.size !== 1) continue;
+      const ficha = [...posibles.values()][0];
+      if (!ficha.fichaId || ficha.dni || idsDniConsultados.has(ficha.fichaId)) continue;
+      idsDniConsultados.add(ficha.fichaId);
+      try {
+        ficha.dni = await leerDniFichaTarea(sheets, ficha.fichaId);
+      } catch (err) {
+        console.warn('[buscar.js] no se pudo leer DNI de ficha candidata para tarea:', err?.message || err);
+      }
+    }
 
     const sinTelefono = [];
     const sinDni = [];
@@ -415,7 +456,7 @@ async function tareas(req, res) {
             start: start.toISOString(),
           });
         }
-        if (!extraerDni(ev.description) && !ficha?.dni) {
+        if (!normalizarDni(extraerDni(ev.description)) && !normalizarDni(ficha?.dni)) {
           sinDni.push({
             id: ev.id,
             calendarId,

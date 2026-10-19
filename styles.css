@@ -40,8 +40,9 @@ a { color: inherit; text-decoration: none; }
 }
 .skip-link:focus { transform: translateY(0); }
 a:focus-visible, button:focus-visible, summary:focus-visible {
-  outline: 3px solid var(--gold);
-  outline-offset: 4px;
+  outline: 3px solid var(--navy);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 2px var(--white);
 }
 .site-header a:focus-visible, .mobile-nav summary:focus-visible { outline-offset: 2px; }
 section[id], footer[id] { scroll-margin-top: 92px; }
@@ -156,6 +157,7 @@ h1, h2, h3 {
     white-space: normal;
   }
   .mobile-nav[open] .nav a { padding: 12px; border-radius: 8px; }
+  .mobile-nav[open] .nav a[href="#instagram"], .mobile-nav[open] .nav a[href="#resenas"] { display: block; }
   .mobile-nav[open] .nav a:hover { background: var(--bg); }
   .nav-cta { padding: 9px 12px; }
 }
@@ -451,7 +453,7 @@ h1, h2, h3 {
 /* ---- Tarjetas de tratamiento clickeables ---- */
 .card { position: relative; display: flex; flex-direction: column; color: inherit; text-decoration: none; padding-bottom: 76px; border: 1px solid rgba(30,58,95,.08); transition: background .25s ease, transform .25s ease, box-shadow .25s ease; }
 .card:hover { background: var(--bg); transform: translateY(-3px); box-shadow: 0 14px 30px rgba(30,58,95,.10); }
-.card:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+.card:focus-visible { outline: 3px solid var(--navy); outline-offset: 3px; box-shadow: 0 0 0 2px var(--white); }
 .card .icon { width: 54px; height: 54px; }
 .card-go { position: absolute; right: 22px; bottom: 22px; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--navy); color: var(--navy); display: flex; align-items: center; justify-content: center; transition: background .25s ease, color .25s ease, border-color .25s ease, transform .25s ease; }
 .card:hover .card-go { background: var(--gold); border-color: var(--gold); color: var(--navy); transform: translateX(3px); }

@@ -30,10 +30,12 @@
 </head>
 <body>
 
+<a class="skip-link" href="#main-content">Saltar al contenido</a>
+
 <header class="site-header">
   <div class="container header-inner">
     <img src="assets/logo-horizontal.png" alt="Franco Vinzón Odontólogo" class="logo" width="1779" height="514">
-    <nav class="nav">
+    <nav class="nav desktop-nav" aria-label="Principal">
       <a href="#tratamientos">Tratamientos</a>
       <a href="/franco-vinzon/">Conocé al odontólogo</a>
       <a href="/blog/">Blog</a>
@@ -41,10 +43,22 @@
       <a href="#ubicacion">Ubicación</a>
       <a href="#resenas">Reseñas</a>
     </nav>
+    <details class="mobile-nav">
+      <summary aria-label="Abrir menú de navegación"><span aria-hidden="true">☰</span> Menú</summary>
+      <nav class="nav" aria-label="Principal para pantallas pequeñas">
+        <a href="#tratamientos">Tratamientos</a>
+        <a href="/franco-vinzon/">Conocé al odontólogo</a>
+        <a href="/blog/">Blog</a>
+        <a href="#instagram">Instagram</a>
+        <a href="#ubicacion">Ubicación</a>
+        <a href="#resenas">Reseñas</a>
+      </nav>
+    </details>
     <a class="btn btn-whatsapp nav-cta" href="https://wa.me/5403442457764?text=Hola!%20Quiero%20sacar%20un%20turno" target="_blank" rel="noopener">WhatsApp</a>
   </div>
 </header>
 
+<main id="main-content">
 <section class="hero">
   <div class="container hero-inner">
     <img src="assets/logo-oficial-full.png" alt="Franco Vinzón Odontólogo" class="hero-logo" width="1949" height="1177" fetchpriority="high" decoding="async">
@@ -317,6 +331,8 @@
   </div>
 </section>
 
+</main>
+
 <footer id="contacto" class="site-footer">
   <div class="container footer-inner">
     <img src="assets/logo-horizontal-blanco.png" alt="Franco Vinzón Odontólogo" class="footer-logo" width="1779" height="514" loading="lazy" decoding="async">
@@ -353,6 +369,12 @@
     track.addEventListener('scroll',()=>{const c=Math.round(track.scrollLeft/(items[0].offsetWidth+16));if(c!==i&&c>=0&&c<items.length){i=c;mark()}},{passive:true});
     mark();
     if(!matchMedia('(prefers-reduced-motion: reduce)').matches){t=setInterval(()=>go(i+1),6000);['pointerdown','mouseenter','focusin'].forEach(e=>track.addEventListener(e,stop,{once:true}))}
+  }
+  // Cerrar el menú móvil al elegir una sección o al presionar Escape.
+  const mobileNav=document.querySelector('.mobile-nav');
+  if(mobileNav){
+    mobileNav.querySelectorAll('a').forEach(link=>link.addEventListener('click',()=>{mobileNav.open=false}));
+    mobileNav.addEventListener('keydown',event=>{if(event.key==='Escape'){mobileNav.open=false;mobileNav.querySelector('summary').focus()}});
   }
   // Abierto ahora
   const b=document.getElementById('open-badge');

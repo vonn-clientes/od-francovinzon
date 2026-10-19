@@ -6,6 +6,10 @@ Registro breve de cambios importantes. Agregar una línea (o pocas) después de 
 
 Los botones "Agregar movimiento", "Entrega de dinero" y "Carga histórica" vuelven a abrir el formulario. `movHaber` está dentro de `.monto-moneda`, por lo que no tiene un `previousElementSibling`; al cambiar la etiqueta del monto, ese acceso nulo lanzaba un error antes de mostrar el formulario. Ahora se busca la etiqueta dentro del campo contenedor.
 
+## 2026-10-19 — Historial de movimientos más legible en /pacientes
+
+Los movimientos anulados quedan ocultos inicialmente y se pueden mostrar con un control que indica cuántos hay; el estado se reinicia al cambiar de ficha. Esto evita que el historial tachado opaque los movimientos vigentes.
+
 ## 2026-10-13 — SEO: dominio nuevo, página "Dentista", 2 notas de blog, logo de VONN
 
 - Dominio público: `odfrancovinzon.vonn.com.ar` (canonicals, sitemap, robots, llms.txt y JSON-LD). `vercel.json` redirige (308) las páginas públicas desde `od-francovinzon.vercel.app`; **no** redirige `/api`, `/gestion`, `/admin`, `/pacientes`, `/turno(s)`, `/t/`, fotos de recetas ni `/assets` (siguen en el dominio viejo, p. ej. el callback de Google OAuth de `api/gestion/pacientes.js`).

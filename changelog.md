@@ -2,6 +2,10 @@
 
 Registro breve de cambios importantes. Agregar una línea (o pocas) después de cada cambio grande — no hace falta detallar cada commit, para eso está `git log`.
 
+## 2026-10-19 — Ficha de paciente más simple y guardado más confiable
+
+Dentro de una ficha se oculta la búsqueda global y queda a mano «Volver a la lista». Se quitó el botón separado «Carga histórica»: cualquier movimiento permite elegir la fecha que corresponde. Se estilizaron los selectores ARS/USD y se apilaron los importes en pantallas angostas para que los campos sigan siendo cómodos. El autosave ya no deja el estado local como guardado cuando la API falla; el error permite reintentar al salir del campo. Se validan fechas de nacimiento reales y se agregaron autocompletado, teclados adecuados y anuncio accesible del estado de guardado.
+
 ## 2026-10-19 — Reparación de formularios de movimientos en /pacientes
 
 Los botones "Agregar movimiento", "Entrega de dinero" y "Carga histórica" vuelven a abrir el formulario. `movHaber` está dentro de `.monto-moneda`, por lo que no tiene un `previousElementSibling`; al cambiar la etiqueta del monto, ese acceso nulo lanzaba un error antes de mostrar el formulario. Ahora se busca la etiqueta dentro del campo contenedor.

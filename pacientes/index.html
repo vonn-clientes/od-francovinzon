@@ -170,7 +170,7 @@
   .btn-add-mov { background: var(--navy); color: var(--white); border: none; padding: 12px 18px; border-radius: 10px; font-weight: 700; font-size: 14px; }
   .btn-add-mov.secondary { background: var(--white); color: var(--navy); border: 1.5px solid var(--line); }
   .mov-tipo-hint { font-size: 12px; color: var(--muted); margin: -4px 0 10px; min-height: 15px; }
-  .mov-tipo-hint.historica { color: var(--gold); font-weight: 600; }
+  .mov-fecha-hint { color: var(--muted); font-size: 12px; margin: -6px 0 8px; }
 
   .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
   .checkbox-row input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--navy); flex-shrink: 0; }
@@ -243,7 +243,16 @@
 
   .monto-moneda { display: flex; gap: 8px; }
   .monto-moneda input { flex: 1; min-width: 0; }
-  .monto-moneda select { width: 128px; flex-shrink: 0; }
+  .monto-moneda select {
+    width: 112px; flex-shrink: 0; appearance: none; -webkit-appearance: none;
+    padding: 9px 27px 9px 10px; border: 1.5px solid var(--line); border-radius: 999px;
+    color: var(--navy); background-color: var(--white); font-size: 12px; font-weight: 700;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m2 4 4 4 4-4' fill='none' stroke='%233E5A80' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; cursor: pointer;
+  }
+  .monto-moneda select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+  @media (max-width: 620px) { .mov-montos .field { flex-basis: 100%; } }
   .dolar-box { background: var(--white); border: 1.5px solid var(--gold); border-radius: 14px; padding: 10px 12px; margin: 4px 0 10px; }
   .dolar-linea { font-size: 12.5px; color: var(--navy-soft); margin-bottom: 8px; }
   .confirm-overlay { position: fixed; inset: 0; background: rgba(30,58,95,.35); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 998; opacity: 0; transition: opacity .18s ease; }
@@ -508,7 +517,7 @@
         <h1 id="f-titulo">—</h1>
         <div class="dni" id="f-dni-header"></div>
       </div>
-      <div class="autosave-status" id="autosave-status"></div>
+      <div class="autosave-status" id="autosave-status" role="status" aria-live="polite" aria-atomic="true"></div>
     </div>
     <button class="btn-obra-social" id="btn-obra-social">🏥 Estado de prestación obra social</button>
     <button class="btn-obra-social" id="btn-fotos" style="margin-left:10px;">📷 Fotos</button>
@@ -519,11 +528,11 @@
     <div class="panel">
       <h2>Datos del paciente</h2>
       <div class="field-row">
-        <div class="field"><label for="ficha-nombre">Nombre</label><input type="text" id="ficha-nombre" data-campo="nombre"></div>
-        <div class="field"><label for="ficha-apellido">Apellido</label><input type="text" id="ficha-apellido" data-campo="apellido"></div>
+        <div class="field"><label for="ficha-nombre">Nombre</label><input type="text" id="ficha-nombre" data-campo="nombre" autocomplete="given-name"></div>
+        <div class="field"><label for="ficha-apellido">Apellido</label><input type="text" id="ficha-apellido" data-campo="apellido" autocomplete="family-name"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label for="ficha-dni">DNI</label><input type="text" id="ficha-dni" data-campo="dni"></div>
+        <div class="field"><label for="ficha-dni">DNI</label><input type="text" id="ficha-dni" data-campo="dni" inputmode="numeric" autocomplete="off"></div>
         <div class="field">
           <label for="fn-dia">Fecha de nacimiento</label>
           <div class="fecha-nac-row">
@@ -540,11 +549,11 @@
         </div>
       </div>
       <div class="field-row">
-        <div class="field full"><label for="ficha-domicilio">Domicilio</label><input type="text" id="ficha-domicilio" data-campo="domicilio"></div>
+        <div class="field full"><label for="ficha-domicilio">Domicilio</label><input type="text" id="ficha-domicilio" data-campo="domicilio" autocomplete="street-address"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label for="ficha-localidad">Localidad</label><input type="text" id="ficha-localidad" data-campo="localidad"></div>
-        <div class="field"><label for="ficha-telefono">Teléfono</label><input type="text" id="ficha-telefono" data-campo="telefono"></div>
+        <div class="field"><label for="ficha-localidad">Localidad</label><input type="text" id="ficha-localidad" data-campo="localidad" autocomplete="address-level2"></div>
+        <div class="field"><label for="ficha-telefono">Teléfono</label><input type="tel" id="ficha-telefono" data-campo="telefono" autocomplete="tel" inputmode="tel"></div>
       </div>
       <div class="field-row">
         <div class="field"><label for="ficha-obra-social">Obra social</label><input type="text" id="ficha-obra-social" data-campo="obraSocial" list="lista-obras-sociales"></div>
@@ -586,24 +595,21 @@
       <div class="mov-btns">
         <button class="btn-add-mov" id="btn-add-mov">+ Agregar movimiento</button>
         <button class="btn-add-mov" id="btn-add-mov-entrega">+ Entrega de dinero</button>
-        <button class="btn-add-mov secondary" id="btn-add-mov-historica">+ Carga histórica</button>
       </div>
     </div>
 
     <div class="panel reveal hidden" id="panel-mov">
       <h2 id="mov-form-titulo">Nuevo movimiento</h2>
       <div class="field-row">
-        <div class="field"><label>Fecha</label><div style="display:flex; gap:8px; align-items:center;"><input type="date" id="mov-fecha"><button type="button" class="btn-add-mov secondary" id="mov-fecha-hoy" style="padding:8px 12px;">Hoy</button></div></div>
+        <div class="field"><label for="mov-fecha">Fecha del movimiento</label><div style="display:flex; gap:8px; align-items:center;"><input type="date" id="mov-fecha"><button type="button" class="btn-add-mov secondary" id="mov-fecha-hoy" style="padding:8px 12px;">Hoy</button></div></div>
       </div>
-      <p class="hidden" id="mov-fecha-hint-historica" style="color: var(--muted); font-size: 12px; margin: -6px 0 4px;">
-        Si no sabés la fecha exacta de una deuda vieja, usá una fecha aproximada (ej. el primer día del mes) — no se puede guardar sin fecha.
-      </p>
+      <p class="mov-fecha-hint">Para registrar algo anterior, cambiá la fecha antes de cargar el movimiento.</p>
       <div class="field-row">
         <div class="field full"><label for="mov-tratamiento">Tratamiento / descripción</label><input type="text" id="mov-tratamiento" list="lista-tratamientos"></div>
       </div>
-      <div class="field-row">
-        <div class="field"><label for="mov-debe">Debe (tratamiento)</label><div class="monto-moneda"><input type="number" id="mov-debe" min="0" step="0.01"><select id="mov-moneda-debe" aria-label="Moneda del debe"><option value="ARS">$ Pesos</option><option value="USD">US$ Dólares</option></select></div></div>
-        <div class="field"><label for="mov-haber">Haber (pago)</label><div class="monto-moneda"><input type="number" id="mov-haber" min="0" step="0.01"><select id="mov-moneda-haber" aria-label="Moneda del pago"><option value="ARS">$ Pesos</option><option value="USD">US$ Dólares</option></select></div></div>
+      <div class="field-row mov-montos">
+        <div class="field"><label for="mov-debe">Tratamiento (se suma al saldo)</label><div class="monto-moneda"><input type="number" id="mov-debe" min="0" step="0.01"><select id="mov-moneda-debe" aria-label="Moneda del tratamiento"><option value="ARS">ARS ($)</option><option value="USD">USD (US$)</option></select></div></div>
+        <div class="field"><label for="mov-haber">Pago recibido (reduce el saldo)</label><div class="monto-moneda"><input type="number" id="mov-haber" min="0" step="0.01"><select id="mov-moneda-haber" aria-label="Moneda del pago recibido"><option value="ARS">ARS ($)</option><option value="USD">USD (US$)</option></select></div></div>
       </div>
       <div id="mov-dolar-wrap" class="dolar-box hidden">
         <div class="dolar-linea">Dólar blue hoy: compra <b id="dolar-compra">…</b> · venta <b id="dolar-venta">…</b> · promedio <b id="dolar-prom">…</b></div>
@@ -889,6 +895,7 @@
   function cambiarVista(vistaMostrar, ...vistasOcultar) {
     vistasOcultar.forEach((v) => ocultarAnimado(v));
     mostrarAnimado(vistaMostrar);
+    document.querySelector('.sticky-bar').classList.toggle('hidden', vistaMostrar.id !== 'vista-lista');
   }
 
   // ---------- Toast / confirm (mismo patrón que /gestion) ----------
@@ -1518,6 +1525,7 @@
   const vistaFusion = document.getElementById('vista-fusion');
   const vistaObraSocial = document.getElementById('vista-obra-social');
   const autosaveStatus = document.getElementById('autosave-status');
+  const campoSaveVersion = new Map();
 
   document.getElementById('volver-lista').addEventListener('click', () => {
     limpiarFormulariosAlNavegar();
@@ -1553,8 +1561,6 @@
     movFecha.value = ''; movTratamiento.value = ''; movDebe.value = ''; movHaber.value = ''; movFormaPago.value = '';
     movMsg.classList.add('hidden');
     movTipoHint.textContent = '';
-    const hintHistorica = document.getElementById('mov-fecha-hint-historica');
-    if (hintHistorica) hintHistorica.classList.add('hidden');
     // El indicador de autosave del encabezado también es por-ficha: no puede quedar el
     // "Guardado ✓" de la ficha anterior flotando sobre la siguiente.
     const statusFicha = document.getElementById('autosave-status');
@@ -1565,7 +1571,7 @@
     if (hintMov) { hintMov.textContent = ''; hintMov.classList.add('hidden'); }
     const hintPres = document.getElementById('pres-autosave-hint');
     if (hintPres) { hintPres.textContent = ''; hintPres.classList.add('hidden'); }
-    editandoMovFila = null; movFilaCreada = null; movFichaId = null; cargaHistorica = false;
+    editandoMovFila = null; movFilaCreada = null; movFichaId = null;
     movFechaGuardada = null;
     editandoPresFila = null; presFilaCreada = null; presFichaId = null;
   }
@@ -1795,7 +1801,7 @@
       </tr>
     `).join('');
 
-    tbody.querySelectorAll('.btn-editar-mov').forEach((btn) => btn.addEventListener('click', () => abrirFormMov(Number(btn.dataset.fila), false)));
+    tbody.querySelectorAll('.btn-editar-mov').forEach((btn) => btn.addEventListener('click', () => abrirFormMov(Number(btn.dataset.fila))));
     tbody.querySelectorAll('.btn-anular-mov').forEach((btn) => btn.addEventListener('click', () => anularMovimiento(Number(btn.dataset.fila), btn)));
   }
 
@@ -1810,6 +1816,10 @@
       const campo = input.dataset.campo;
       const valor = input.value;
       if (!fichaActual || fichaActual.campos[campo] === valor) return;
+      const idFicha = fichaActual.id;
+      const valorAnterior = fichaActual.campos[campo];
+      const version = (campoSaveVersion.get(campo) || 0) + 1;
+      campoSaveVersion.set(campo, version);
       fichaActual.campos[campo] = valor;
       // Obra social / Nº de afiliado / Plan aparecen duplicados (ficha principal + vista
       // aparte, mismos data-campo) — al guardar desde cualquiera de los dos lados, se
@@ -1820,7 +1830,8 @@
       autosaveStatus.textContent = 'Guardando…';
       autosaveStatus.className = 'autosave-status saving';
       try {
-        const r = await apiPost({ accion: 'actualizar-campo', id: fichaActual.id, campo, valor });
+        const r = await apiPost({ accion: 'actualizar-campo', id: idFicha, campo, valor });
+        if (fichaActual?.id !== idFicha || campoSaveVersion.get(campo) !== version) return;
         if (r.success) {
           autosaveStatus.textContent = r.pendiente ? 'Guardado (pendiente de sincronizar)' : 'Guardado';
           autosaveStatus.className = 'autosave-status ' + (r.pendiente ? 'saving' : 'ok');
@@ -1832,7 +1843,9 @@
           throw new Error();
         }
       } catch (e) {
-        autosaveStatus.textContent = 'Error al guardar';
+        if (fichaActual?.id !== idFicha || campoSaveVersion.get(campo) !== version) return;
+        fichaActual.campos[campo] = valorAnterior;
+        autosaveStatus.textContent = 'No guardado · reintentá al salir del campo';
         autosaveStatus.className = 'autosave-status error';
       }
       setTimeout(() => { if (autosaveStatus.textContent !== 'Guardando…') autosaveStatus.textContent = ''; }, 3000);
@@ -1845,16 +1858,23 @@
   const fnAnio = document.getElementById('fn-anio');
   async function guardarFechaNacValor(valor) {
     if (!fichaActual || fichaActual.campos.fechaNacimiento === valor) return;
+    const idFicha = fichaActual.id;
+    const valorAnterior = fichaActual.campos.fechaNacimiento;
+    const version = (campoSaveVersion.get('fechaNacimiento') || 0) + 1;
+    campoSaveVersion.set('fechaNacimiento', version);
     fichaActual.campos.fechaNacimiento = valor;
     autosaveStatus.textContent = 'Guardando…';
     autosaveStatus.className = 'autosave-status saving';
     try {
-      const r = await apiPost({ accion: 'actualizar-campo', id: fichaActual.id, campo: 'fechaNacimiento', valor });
+      const r = await apiPost({ accion: 'actualizar-campo', id: idFicha, campo: 'fechaNacimiento', valor });
+      if (fichaActual?.id !== idFicha || campoSaveVersion.get('fechaNacimiento') !== version) return;
       if (!r.success) throw new Error();
       autosaveStatus.textContent = r.pendiente ? 'Guardado (pendiente de sincronizar)' : 'Guardado';
       autosaveStatus.className = 'autosave-status ' + (r.pendiente ? 'saving' : 'ok');
     } catch (e) {
-      autosaveStatus.textContent = 'Error al guardar';
+      if (fichaActual?.id !== idFicha || campoSaveVersion.get('fechaNacimiento') !== version) return;
+      fichaActual.campos.fechaNacimiento = valorAnterior;
+      autosaveStatus.textContent = 'No se guardó; salí del campo para reintentar';
       autosaveStatus.className = 'autosave-status error';
     }
     setTimeout(() => { if (autosaveStatus.textContent !== 'Guardando…') autosaveStatus.textContent = ''; }, 3000);
@@ -1871,6 +1891,15 @@
       autosaveStatus.className = 'autosave-status error';
       return;
     }
+    const anioNum = Number(anio);
+    const ultimoDia = new Date(anioNum, Number(mes), 0).getDate();
+    const fechaIso = `${anio}-${mes}-${String(diaNum).padStart(2, '0')}`;
+    const hoyArgentina = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+    if (!/^\d{4}$/.test(anio) || anioNum < 1900 || anioNum > 2100 || diaNum > ultimoDia || fechaIso > hoyArgentina) {
+      autosaveStatus.textContent = 'Fecha de nacimiento inválida';
+      autosaveStatus.className = 'autosave-status error';
+      return;
+    }
     guardarFechaNacValor(`${String(diaNum).padStart(2, '0')}/${mes}/${anio.padStart(4, '0')}`);
   }
   [fnDia, fnMes, fnAnio].forEach((el) => el.addEventListener('blur', guardarFechaNacimiento));
@@ -1878,9 +1907,8 @@
 
   // ---------- Movimientos ----------
   // El tipo (Tratamiento / Pago / Tratamiento + Pago) ya no se elige a mano: se infiere
-  // solo según qué montos se cargan. "Carga histórica" es un botón aparte que abre el
-  // mismo formulario, solo cambia el título y deja "Forma de pago" siempre visible (para
-  // registros viejos no siempre alcanza con mirar si hay Haber cargado).
+  // solo según qué montos se cargan. Los movimientos anteriores usan este mismo formulario
+  // con la fecha correspondiente, sin un modo separado de carga.
   const panelMov = document.getElementById('panel-mov');
   const movFecha = document.getElementById('mov-fecha');
   const movTratamiento = document.getElementById('mov-tratamiento');
@@ -1931,7 +1959,6 @@
   // decisions.md) a pedido explícito — 2026-08-13, solo se guardaba en mayúscula
   // completa antes. "Forma de pago" sigue en mayúscula, no se pidió cambiarla.
   [movFormaPago].forEach(conectarMayusculas);
-  let cargaHistorica = false;
   let mostrarMovimientosAnulados = false;
   let fichaMovimientosAnuladosId = null;
 
@@ -1946,12 +1973,6 @@
   }
   function actualizarHintTipo() {
     const formaWrap = document.getElementById('mov-forma-pago-wrap');
-    if (cargaHistorica) {
-      movTipoHint.textContent = 'Carga histórica';
-      movTipoHint.className = 'mov-tipo-hint historica';
-      formaWrap.style.display = '';
-      return;
-    }
     const tipo = tipoInferido();
     const etiquetas = { tratamiento: 'Tratamiento', pago: 'Pago', 'tratamiento-pago': 'Tratamiento + Pago', 'sin-monto': 'Tratamiento (sin cobro)' };
     movTipoHint.textContent = tipo ? `Se va a guardar como: ${etiquetas[tipo]}` : 'Cargá un monto de tratamiento, de pago, o una descripción.';
@@ -1960,13 +1981,12 @@
   }
   [movDebe, movHaber, movTratamiento].forEach((el) => el.addEventListener('input', actualizarHintTipo));
 
-  document.getElementById('btn-add-mov').addEventListener('click', () => abrirFormMov(null, false));
-  document.getElementById('btn-add-mov-entrega').addEventListener('click', () => abrirFormMov(null, false, true));
+  document.getElementById('btn-add-mov').addEventListener('click', () => abrirFormMov(null));
+  document.getElementById('btn-add-mov-entrega').addEventListener('click', () => abrirFormMov(null, true));
   document.getElementById('mov-fecha-hoy').addEventListener('click', () => {
     movFecha.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
     movFecha.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  document.getElementById('btn-add-mov-historica').addEventListener('click', () => abrirFormMov(null, true));
   document.getElementById('mov-cancelar').addEventListener('click', cerrarFormMov);
 
   function fechaSheetAInput(fechaStr) {
@@ -1991,10 +2011,8 @@
     return Number.isFinite(n) && n !== 0 ? n : '';
   }
 
-  const movFechaHintHistorica = document.getElementById('mov-fecha-hint-historica');
-
   let movSesionId = 0; // token: cada apertura del form invalida flushes/guardados viejos
-  function abrirFormMov(fila, historica, entrega) {
+  function abrirFormMov(fila, entrega = false) {
     editandoMovFila = fila;
     // Autosave (tipo Google Sheets): estado del formulario recién abierto. movFilaCreada
     // solo se setea cuando el AUTOSAVE crea la fila (movimiento nuevo) — una fila
@@ -2007,7 +2025,6 @@
     // anterior sigue en vuelo (flush de cerrarFormMov o autosave lento), este form
     // nuevo tiene que esperar a que termine (autosaveMovAhora reintenta solo en 400ms)
     // — si no, dos movimiento-agregar podrían correr a la vez y duplicar la fila.
-    cargaHistorica = !!historica;
     movMsg.classList.add('hidden');
     const hintMovAlAbrir = document.getElementById('mov-autosave-hint');
     if (hintMovAlAbrir) { hintMovAlAbrir.textContent = ''; hintMovAlAbrir.classList.add('hidden'); }
@@ -2025,7 +2042,7 @@
       movAplica.value = mov.aplicaA || movMonedaHaber.value;
       movCotizacion.value = mov.cotizacion || '';
     } else {
-      document.getElementById('mov-form-titulo').textContent = entrega ? 'Entrega de dinero' : (cargaHistorica ? 'Carga histórica' : 'Nuevo movimiento');
+      document.getElementById('mov-form-titulo').textContent = entrega ? 'Entrega de dinero' : 'Nuevo movimiento';
       movFecha.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
       movFechaGuardada = null; // todavía no se guardó nada: el alta confirmará solo
       movTratamiento.value = '';
@@ -2037,10 +2054,6 @@
     // Fichas con dólares: el bloque ya viene abierto. Las demás lo ven como un link chico.
     movTeniaMoneda = !!(fila && (() => { const m = fichaActual.movimientos.find((x) => x.fila === fila); return m && (m.monedaDebe || m.monedaHaber || m.aplicaA); })());
     actualizarDolarMov();
-    // Solo se muestra al cargar un movimiento NUEVO desde "Carga histórica" — al editar
-    // una fila vieja ya sin fecha (protegida por el fix de primeraFilaLibre(), ver
-    // decisions.md) no hace falta inventarle ninguna.
-    movFechaHintHistorica.classList.toggle('hidden', !(cargaHistorica && !fila));
     // Modo "Entrega de dinero": mismo formulario, pero solo fecha + monto + forma de pago
     // (sin tratamiento ni Debe). Se guarda como un pago normal (Haber), igual que siempre.
     const modoEntrega = !!entrega && !fila;

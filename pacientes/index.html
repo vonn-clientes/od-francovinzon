@@ -992,16 +992,24 @@
     document.getElementById('asignar-banner').classList.remove('hidden');
   }
   async function asignarATurno(fichaId, nombreFicha) {
-    if (!confirm(`¿Vincular a ${paramsAsignar.get('nombre') || 'esta persona'} con la ficha de ${nombreFicha.trim()}?`)) return;
+    const persona = paramsAsignar.get('nombre') || 'esta persona';
+    const ok = await confirmDialog({
+      title: 'Vincular con esta ficha',
+      message: `Los turnos de ${persona} van a quedar asociados a la ficha de ${nombreFicha.trim()}. Una ficha puede tener muchos turnos.`,
+      confirmLabel: 'Vincular',
+    });
+    if (!ok) return;
     try {
       const r = await apiPost({ accion: 'asignar-turno-a-ficha', fila: asignarFila, fichaId });
       if (r.success) {
-        alert('Listo, quedó vinculada. Podés cerrar esta pestaña y recargar el admin.');
-        location.href = '/pacientes';
+        toast('Vinculada ✓ — volvé al admin y recargá la lista');
+        setTimeout(() => { location.href = '/pacientes'; }, 1500);
       } else {
-        alert(r.message || 'No se pudo vincular.');
+        await confirmDialog({ title: 'No se pudo vincular', message: r.message || 'Probá de nuevo.', confirmLabel: 'Entendido', cancelLabel: 'Cerrar' });
       }
-    } catch (e) { if (e.message !== 'unauthorized') alert('Error de red. Probá de nuevo.'); }
+    } catch (e) {
+      if (e.message !== 'unauthorized') await confirmDialog({ title: 'Error de red', message: 'Probá de nuevo.', confirmLabel: 'Entendido', cancelLabel: 'Cerrar' });
+    }
   }
 
   function normalizar(str) {

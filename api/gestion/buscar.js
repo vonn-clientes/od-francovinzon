@@ -4,7 +4,7 @@ import {
   isValidGestionKey, toArgDate, formatArgDay,
 } from '../../lib/googleCalendar.js';
 import { buscarPacienteConsolidadoPorNombre, buscarPacienteConsolidadoPorDni, buscarPacienteConsolidadoPorTelefono, listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
-import { normalizarDni, rangoPrestacionesObraSocial, PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, SHEET_NAME, parsearNombreArchivo } from '../../lib/pacientesSheet.js';
+import { normalizarDni, normalizarTelefonoMapeo, rangoPrestacionesObraSocial, PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, SHEET_NAME, parsearNombreArchivo } from '../../lib/pacientesSheet.js';
 import { getPacientesSheetsClient, getPacientesDriveClient } from '../../lib/googleOAuthPacientes.js';
 import { esFeriado } from '../../lib/feriados.js';
 import { conReintentos } from '../../lib/retry.js';
@@ -342,6 +342,7 @@ async function tareas(req, res) {
       console.warn('[buscar.js] no se pudo cruzar tareas con fichas:', err?.message || err);
     }
     const porDniFicha = new Map();
+    const porTelefonoFicha = new Map();
     const porNombreFicha = new Map();
     const fichasIndexadas = new Map(pacientes.filter((x) => x.fichaId).map((p) => [p.fichaId, p]));
     // La hoja central se actualiza best-effort cuando alguien carga/edita datos. Si
@@ -377,6 +378,11 @@ async function tareas(req, res) {
         if (!porDniFicha.has(dni)) porDniFicha.set(dni, new Map());
         porDniFicha.get(dni).set(p.fichaId, p);
       }
+      const telefono = normalizarTelefonoMapeo(p.telefono);
+      if (telefono) {
+        if (!porTelefonoFicha.has(telefono)) porTelefonoFicha.set(telefono, new Map());
+        porTelefonoFicha.get(telefono).set(p.fichaId, p);
+      }
       const nombre = claveNombreTarea(`${p.nombre} ${p.apellido}`);
       if (nombre) {
         if (!porNombreFicha.has(nombre)) porNombreFicha.set(nombre, new Map());
@@ -388,6 +394,10 @@ async function tareas(req, res) {
       const porDni = dni ? porDniFicha.get(dni) : null;
       if (porDni?.size === 1) return [...porDni.values()][0];
       if (porDni?.size > 1) return null; // DNI duplicado: no adivinar.
+      const telefono = normalizarTelefonoMapeo(extraerTelefono(ev.description));
+      const porTelefono = telefono ? porTelefonoFicha.get(telefono) : null;
+      if (porTelefono?.size === 1) return [...porTelefono.values()][0];
+      if (porTelefono?.size > 1) return null; // Teléfono compartido: no adivinar.
       const nombre = normalizarTexto(ev.summary || '');
       const porNombre = porNombreFicha.get(claveNombreTarea(nombre));
       return porNombre?.size === 1 ? [...porNombre.values()][0] : null;
@@ -401,9 +411,8 @@ async function tareas(req, res) {
     for (const { ev } of todos) {
       const { start } = eventBounds(ev);
       if (start >= limiteSinTelefono || extraerDni(ev.description)) continue;
-      const posibles = porNombreFicha.get(claveNombreTarea(ev.summary || ''));
-      if (posibles?.size !== 1) continue;
-      const ficha = [...posibles.values()][0];
+      const ficha = fichaPorTurno(ev);
+      if (!ficha) continue;
       if (!ficha.fichaId || ficha.dni || idsDniConsultados.has(ficha.fichaId)) continue;
       idsDniConsultados.add(ficha.fichaId);
       try {

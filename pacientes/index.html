@@ -2023,7 +2023,7 @@
     modoEntregaActivo = modoEntrega;
     movTratamiento.closest('.field-row').style.display = modoEntrega ? 'none' : '';
     movDebe.closest('.field').style.display = modoEntrega ? 'none' : '';
-    movHaber.previousElementSibling.textContent = modoEntrega ? 'Monto entregado' : 'Haber (pago)';
+    movHaber.closest('.field').querySelector('label').textContent = modoEntrega ? 'Monto entregado' : 'Haber (pago)';
     actualizarHintTipo();
     mostrarAnimado(panelMov);
     panelMov.scrollIntoView({ behavior: 'smooth', block: 'center' });

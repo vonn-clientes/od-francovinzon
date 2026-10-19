@@ -158,6 +158,9 @@
   .mov-table tr:last-child td { border-bottom: none; }
   .mov-table tr.anulado { opacity: .5; text-decoration: line-through; }
   .mov-table .num { text-align: right; white-space: nowrap; }
+  .mov-anulados-toggle { margin: 0 0 8px; padding: 5px 0; border: 0; background: transparent; color: var(--navy); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .mov-anulados-toggle:hover { text-decoration: underline; }
+  .mov-anulados-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 3px; }
   .mov-actions { display: flex; gap: 4px; }
   .icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--white); color: var(--navy); font-size: 12.5px; display: flex; align-items: center; justify-content: center; }
   .icon-btn:hover { background: var(--cream); }
@@ -571,6 +574,7 @@
 
     <div class="panel">
       <h2>Movimientos</h2>
+      <div id="mov-anulados-controls" class="hidden"></div>
       <div class="mov-table-wrap">
         <table class="mov-table">
           <thead>
@@ -1751,11 +1755,29 @@
 
   function renderMovimientos() {
     const tbody = document.getElementById('mov-tbody');
-    if (!fichaActual.movimientos.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted); text-align:center; padding:16px;">Sin movimientos todavía.</td></tr>';
+    if (fichaMovimientosAnuladosId !== fichaActual.id) {
+      fichaMovimientosAnuladosId = fichaActual.id;
+      mostrarMovimientosAnulados = false;
+    }
+    const movimientos = movimientosConSaldo(fichaActual.movimientos);
+    const anulados = movimientos.filter((m) => m.anulado);
+    const controlesAnulados = document.getElementById('mov-anulados-controls');
+    controlesAnulados.classList.toggle('hidden', anulados.length === 0);
+    controlesAnulados.innerHTML = anulados.length
+      ? `<button type="button" class="mov-anulados-toggle" aria-expanded="${mostrarMovimientosAnulados}">${mostrarMovimientosAnulados ? 'Ocultar' : 'Mostrar'} movimientos anulados (${anulados.length})</button>`
+      : '';
+    const btnAnulados = controlesAnulados.querySelector('.mov-anulados-toggle');
+    if (btnAnulados) btnAnulados.addEventListener('click', () => {
+      mostrarMovimientosAnulados = !mostrarMovimientosAnulados;
+      renderMovimientos();
+    });
+    const visibles = mostrarMovimientosAnulados ? movimientos : movimientos.filter((m) => !m.anulado);
+    if (!visibles.length) {
+      const mensaje = anulados.length ? 'Sin movimientos activos.' : 'Sin movimientos todavía.';
+      tbody.innerHTML = `<tr><td colspan="7" style="color:var(--muted); text-align:center; padding:16px;">${mensaje}</td></tr>`;
       return;
     }
-    tbody.innerHTML = movimientosConSaldo(fichaActual.movimientos).map((m) => `
+    tbody.innerHTML = visibles.map((m) => `
       <tr class="${m.anulado ? 'anulado' : ''}" data-fila="${m.fila}">
         <td>${escapeHtml(m.fecha)}</td>
         <td>${escapeHtml(m.tratamiento)}</td>
@@ -1910,6 +1932,8 @@
   // completa antes. "Forma de pago" sigue en mayúscula, no se pidió cambiarla.
   [movFormaPago].forEach(conectarMayusculas);
   let cargaHistorica = false;
+  let mostrarMovimientosAnulados = false;
+  let fichaMovimientosAnuladosId = null;
 
   function tipoInferido() {
     const debe = Number(movDebe.value) || 0;
@@ -2023,7 +2047,7 @@
     modoEntregaActivo = modoEntrega;
     movTratamiento.closest('.field-row').style.display = modoEntrega ? 'none' : '';
     movDebe.closest('.field').style.display = modoEntrega ? 'none' : '';
-    movHaber.previousElementSibling.textContent = modoEntrega ? 'Monto entregado' : 'Haber (pago)';
+    movHaber.closest('.field').querySelector('label').textContent = modoEntrega ? 'Monto entregado' : 'Haber (pago)';
     actualizarHintTipo();
     mostrarAnimado(panelMov);
     panelMov.scrollIntoView({ behavior: 'smooth', block: 'center' });

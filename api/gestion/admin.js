@@ -78,6 +78,7 @@ export default async function handler(req, res) {
       if (recurso === 'actividad') return await getActividad(req, res);
       if (recurso === 'monitoreo') return await getMonitoreo(req, res);
       if (recurso === 'metricas') return await servirMetricas('basicas', getMetricas, req, res);
+      if (recurso === 'deuda') return await conError(getMetricasDeuda, req, res);
       if (recurso === 'metricas-avanzadas') return await servirMetricas('avanzadas', getMetricasAvanzadas, req, res);
       if (recurso === 'publico-objetivo') return await servirMetricas('perfil', calcularPerfilJson, req, res);
       if (recurso === 'pacientes-totales') return await conError(getPacientesTotales, req, res);
@@ -490,15 +491,13 @@ async function leerSnapshot(nombre) {
 }
 
 function snapshotCompleto(nombre, data) {
-  if (nombre === 'basicas' || nombre === 'avanzadas') {
+  if (nombre === 'avanzadas') {
     if (data?.fichasFallidas == null) return false;
     if (!Number.isFinite(Number(data?.fichasFallidas))) return false;
-    if (nombre === 'basicas' && data?.totalFichas == null) return false;
-    if (nombre === 'basicas' && !Number.isFinite(Number(data?.totalFichas))) return false;
-    if (nombre === 'avanzadas' && data?.totalFichasEscaneadas == null) return false;
-    if (nombre === 'avanzadas' && !Number.isFinite(Number(data?.totalFichasEscaneadas))) return false;
     if (Number(data?.fichasFallidas) > 0) return false;
-    if (nombre === 'avanzadas' && data?.pacientesTotales?.total == null) return false;
+    if (data?.totalFichasEscaneadas == null) return false;
+    if (!Number.isFinite(Number(data?.totalFichasEscaneadas))) return false;
+    if (data?.pacientesTotales?.total == null) return false;
   }
   if (nombre === 'perfil') {
     const fallidas = (data?.filas || []).find((f) => f[0] === 'Resumen' && f[1] === 'Fichas que no se pudieron leer');
@@ -794,18 +793,12 @@ async function getMetricas(req, res) {
   const errores = [];
   const [
     { eventos, porDia, online, cargadoAyelen, confirmados, nuevos, recurrentes, total },
-    { conDeuda, totalPacientesConSaldo, totalFichas, fallidos: fichasFallidas, topDeudoresMonto, topDeudoresAntiguedad },
     { cancelados, reprogramados },
   ] = await Promise.all([
     calcularTurnos(desde, hasta).catch((err) => {
       console.error('[admin.js] calcularTurnos falló:', err);
       errores.push(`turnos: ${err?.message || err}`);
       return TURNOS_VACIO;
-    }),
-    calcularDeuda(!!req.query.forzar).catch((err) => {
-      console.error('[admin.js] calcularDeuda falló:', err);
-      errores.push(`fichas/deuda: ${err?.message || err}`);
-      return { conDeuda: 0, totalPacientesConSaldo: null, fallidos: null, totalFichas: null, topDeudoresMonto: [], topDeudoresAntiguedad: [] };
     }),
     calcularCancelacionesYReprogramaciones(desde, hasta),
   ]);
@@ -822,13 +815,20 @@ async function getMetricas(req, res) {
     totalTurnos: eventos.length,
     cancelados,
     reprogramados,
-    porcentajeConDeuda: totalPacientesConSaldo ? Math.round((conDeuda / totalPacientesConSaldo) * 100) : null,
-    topDeudoresMonto: topDeudoresMonto.slice(0, 10),
-    topDeudoresAntiguedad: topDeudoresAntiguedad.slice(0, 10),
-    totalPacientesConSaldo,
-    totalFichas,
-    fichasFallidas,
+    porcentajeConDeuda: null,
+    topDeudoresMonto: [],
+    topDeudoresAntiguedad: [],
+    totalPacientesConSaldo: null,
+    totalFichas: null,
+    fichasFallidas: null,
   });
+}
+
+// Los datos de turnos y deuda se sirven por separado para que el dashboard principal
+// no quede bloqueado por la lectura individual de cientos de hojas de cálculo.
+async function getMetricasDeuda(req, res) {
+  const deuda = await calcularDeuda(!!req.query.forzar);
+  res.status(200).json({ success: true, ...deuda, fichasFallidas: deuda.fallidos });
 }
 
 // ---------- 9b. Métricas avanzadas (ocupación, inasistencia, ingresos, pacientes, ticket) ----------

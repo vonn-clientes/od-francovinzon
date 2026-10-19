@@ -606,10 +606,12 @@
       // Evita que deuda, finanzas y público objetivo abran a la vez tres recorridos
       // completos por las fichas. El servidor comparte el escaneo entre estas cargas.
       dashboard: async () => {
-        await Promise.all([cargarDashboard(), cargarPacientesTotales()]);
+        // La lista operativa y los totales de pacientes vienen de la planilla
+        // consolidada; cargarlos no debe quedar esperando el escaneo financiero de
+        // cientos de fichas ni el perfil de audiencia.
+        await Promise.all([cargarDashboard(), cargarPacientesTotales(), cargarSinFicha()]);
         await cargarDashboardAvanzado();
         await cargarPublico();
-        await cargarSinFicha();
       },
       'reserva-online': cargarReservaOnline,
       horarios: cargarHorarios, textos: cargarTextos,
@@ -657,7 +659,7 @@
         ['Reprogramados', m.reprogramados],
         ['% pacientes nuevos', `${m.porcentajeNuevos}%`],
         ['% recurrentes', `${m.porcentajeRecurrentes}%`],
-        ['% pacientes con deuda', m.porcentajeConDeuda == null ? 'N/D' : `${m.porcentajeConDeuda}%`],
+        ['% pacientes con deuda', m.porcentajeConDeuda == null ? 'Calculando…' : `${m.porcentajeConDeuda}%`],
       ].map(([label, num]) => `<div class="stat-tile"><div class="num">${num}</div><div class="label">${label}</div></div>`).join('');
 
       const fmtFechaBarra = (f) => new Date(`${f}T00:00:00`).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
@@ -666,35 +668,60 @@
         `<div class="bar" style="height:${Math.max(2, Math.round((d.cantidad / max) * 116))}px" data-tooltip="${d.cantidad} turno${d.cantidad === 1 ? '' : 's'} — ${fmtFechaBarra(d.fecha)}"></div>`
       ).join('') || '<p class="hint">Sin turnos en este rango.</p>';
 
-      document.querySelector('#dash-deudores-monto tbody').innerHTML = m.topDeudoresMonto.map((d) =>
-        `<tr><td>${d.nombre}</td><td>$${d.saldo.toLocaleString('es-AR')}</td></tr>`
+      document.querySelector('#dash-deudores-monto tbody').innerHTML = m.totalPacientesConSaldo == null ? '<tr><td colspan="2">Calculando saldos…</td></tr>' : m.topDeudoresMonto.map((d) =>
+        `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>$${Number(d.saldo).toLocaleString('es-AR')}</td></tr>`
       ).join('') || '<tr><td colspan="2">Sin deudores.</td></tr>';
 
-      document.querySelector('#dash-deudores-antiguedad tbody').innerHTML = m.topDeudoresAntiguedad.map((d) =>
-        `<tr><td>${d.nombre}</td><td>${d.dias} días</td></tr>`
+      document.querySelector('#dash-deudores-antiguedad tbody').innerHTML = m.totalPacientesConSaldo == null ? '<tr><td colspan="2">Calculando saldos…</td></tr>' : m.topDeudoresAntiguedad.map((d) =>
+        `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>${d.dias} días</td></tr>`
       ).join('') || '<tr><td colspan="2">Sin datos.</td></tr>';
 
       // Visibilidad de completitud del escaneo de fichas — antes una ficha que no se
       // podía leer (rate limit transitorio, error de Sheets) desaparecía en silencio
       // del cálculo de deuda sin ningún rastro (pedido explícito, 2026-08-13: "fijate
       // si se están completando todos los saldos").
-      const completitud = document.getElementById('dash-deuda-completitud');
-      completitud.textContent = m.fichasFallidas
-        ? `⚠️ Se leyeron ${m.totalPacientesConSaldo} de ${m.totalFichas || (m.totalPacientesConSaldo + m.fichasFallidas)} fichas. Algunos saldos pueden faltar. ${m.errorLectura ? `Último error: ${m.errorLectura}` : 'Volvé a actualizar en un momento.'}`
-        : m.totalFichas == null
-          ? '⚠️ No se pudo completar la lectura de las fichas. Revisá el mensaje de error.'
-          : `Calculado sobre ${m.totalPacientesConSaldo} fichas.`;
-      completitud.style.color = m.fichasFallidas || m.totalFichas == null ? 'var(--bad)' : '';
+      if (m.totalPacientesConSaldo != null) renderDeuda(m);
 
       // Algunas partes pueden fallar sin tumbar el resto (ver getMetricas en
       // api/gestion/admin.js) — si pasó, se muestra acá el motivo real en vez de
       // dejarlo invisible en los logs de Vercel.
       setMsg('dash-msg', (m.errores || []).join(' · '), m.errores?.length ? 'error' : '');
+      if (m.totalPacientesConSaldo == null) cargarDeuda(forzar);
     } catch (e) {
-      if (e.message !== 'unauthorized') setMsg('dash-msg', 'No se pudieron cargar las métricas.', 'error');
+      if (e.message !== 'unauthorized') {
+        document.getElementById('dash-stats').innerHTML = '<p class="hint">No se pudo cargar el resumen de turnos.</p>';
+        setMsg('dash-msg', 'No se pudieron cargar las métricas de turnos.', 'error');
+      }
     }
   }
   document.getElementById('dash-refrescar').addEventListener('click', () => cargarDashboard(true));
+
+  function renderDeuda(m) {
+    const tile = [...document.querySelectorAll('#dash-stats .stat-tile')].find((el) => el.querySelector('.label')?.textContent === '% pacientes con deuda');
+    const porcentaje = m.porcentajeConDeuda ?? (m.totalPacientesConSaldo ? Math.round((m.conDeuda / m.totalPacientesConSaldo) * 100) : null);
+    if (tile) tile.querySelector('.num').textContent = porcentaje == null ? 'N/D' : `${porcentaje}%`;
+    document.querySelector('#dash-deudores-monto tbody').innerHTML = (m.topDeudoresMonto || []).map((d) =>
+      `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>$${Number(d.saldo).toLocaleString('es-AR')}</td></tr>`
+    ).join('') || '<tr><td colspan="2">Sin deudores.</td></tr>';
+    document.querySelector('#dash-deudores-antiguedad tbody').innerHTML = (m.topDeudoresAntiguedad || []).map((d) =>
+      `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>${d.dias} días</td></tr>`
+    ).join('') || '<tr><td colspan="2">Sin datos.</td></tr>';
+    const completitud = document.getElementById('dash-deuda-completitud');
+    completitud.textContent = m.fichasFallidas
+      ? `⚠️ Se leyeron ${m.totalPacientesConSaldo} de ${m.totalFichas || (m.totalPacientesConSaldo + m.fichasFallidas)} fichas. Algunos saldos pueden faltar. ${m.errorLectura ? `Último error: ${m.errorLectura}` : 'Volvé a actualizar en un momento.'}`
+      : `Calculado sobre ${m.totalPacientesConSaldo} fichas.`;
+    completitud.style.color = m.fichasFallidas ? 'var(--bad)' : '';
+  }
+
+  async function cargarDeuda(forzar = false) {
+    try {
+      const m = await apiGet('deuda', forzar ? { forzar: 1 } : {});
+      if (m.success) renderDeuda(m);
+      else setMsg('dash-msg', m.error || 'No se pudieron calcular los saldos.', 'error');
+    } catch (e) {
+      if (e.message !== 'unauthorized') setMsg('dash-msg', 'No se pudieron calcular los saldos. El resto del panel sigue disponible.', 'error');
+    }
+  }
 
   // ---------- Dashboard: métricas avanzadas (ocupación, inasistencia, ingresos, pacientes, ticket) ----------
   const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -1012,12 +1039,12 @@
     tbody.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
     try {
       const r = await apiGet('sin-ficha');
-      if (!r.success) throw new Error('x');
+      if (!r.success) throw new Error(r.error || 'La respuesta no incluye la lista.');
       sinFichaLista = r.sinFicha;
       asignadasAhora.clear();
       renderSinFicha();
     } catch (e) {
-      if (e.message !== 'unauthorized') tbody.innerHTML = '<tr><td colspan="5">No se pudo cargar.</td></tr>';
+      if (e.message !== 'unauthorized') tbody.innerHTML = `<tr><td colspan="5">No se pudo cargar la lista: ${escapeHtmlAdmin(e.message || 'Error de conexión.')}</td></tr>`;
     }
   }
 

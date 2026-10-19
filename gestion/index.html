@@ -637,24 +637,24 @@
     <div id="mc-form-wrap" class="hidden">
       <div id="mc-datos-nombre">
         <div class="field-row">
-          <div class="field"><label>Nombre</label><input type="text" id="mc-nombre" autocomplete="off"><div class="autocomplete-dropdown hidden" id="mc-nombre-dropdown"></div></div>
-          <div class="field"><label>Apellido</label><input type="text" id="mc-apellido"></div>
+          <div class="field"><label for="mc-nombre">Nombre</label><input type="text" id="mc-nombre" autocomplete="off"><div class="autocomplete-dropdown hidden" id="mc-nombre-dropdown"></div></div>
+          <div class="field"><label for="mc-apellido">Apellido</label><input type="text" id="mc-apellido"></div>
         </div>
       </div>
       <div id="mc-datos-paciente">
         <div class="field-row">
-          <div class="field"><label>Teléfono</label><input type="text" id="mc-telefono"></div>
-          <div class="field"><label>DNI</label><input type="text" id="mc-dni" inputmode="numeric" placeholder="Sin puntos ni espacios"></div>
+          <div class="field"><label for="mc-telefono">Teléfono</label><input type="text" id="mc-telefono"></div>
+          <div class="field"><label for="mc-dni">DNI</label><input type="text" id="mc-dni" inputmode="numeric" placeholder="Sin puntos ni espacios"></div>
         </div>
         <div class="field-row">
-          <div class="field full"><label>Correo electrónico (opcional)</label><input type="email" id="mc-email" placeholder="Para el registro del paciente"></div>
+          <div class="field full"><label for="mc-email">Correo electrónico (opcional)</label><input type="email" id="mc-email" placeholder="Para el registro del paciente"></div>
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="mc-nuevo">
           <label for="mc-nuevo">Paciente nuevo</label>
         </div>
       </div>
-      <div class="field"><label>Motivo</label><input type="text" id="mc-motivo"></div>
+      <div class="field"><label for="mc-motivo">Motivo</label><input type="text" id="mc-motivo"></div>
     </div>
 
     <div class="panel-actions">
@@ -667,14 +667,14 @@
   <div id="panel-turno" class="panel hidden">
     <h2>Nuevo sobreturno</h2>
     <div class="field-row">
-      <div class="field"><label>Nombre</label><input type="text" id="t-nombre" autocomplete="off"><div class="autocomplete-dropdown hidden" id="t-nombre-dropdown"></div></div>
-      <div class="field"><label>Apellido</label><input type="text" id="t-apellido"></div>
+      <div class="field"><label for="t-nombre">Nombre</label><input type="text" id="t-nombre" autocomplete="off"><div class="autocomplete-dropdown hidden" id="t-nombre-dropdown"></div></div>
+      <div class="field"><label for="t-apellido">Apellido</label><input type="text" id="t-apellido"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Hora</label><input type="time" id="t-hora" step="900"></div>
-      <div class="field"><label>Teléfono</label><input type="text" id="t-telefono"></div>
+      <div class="field"><label for="t-hora">Hora</label><input type="time" id="t-hora" step="900"></div>
+      <div class="field"><label for="t-telefono">Teléfono</label><input type="text" id="t-telefono"></div>
     </div>
-    <div class="field"><label>Motivo</label><input type="text" id="t-motivo"></div>
+    <div class="field"><label for="t-motivo">Motivo</label><input type="text" id="t-motivo"></div>
     <div class="panel-actions">
       <button class="btn-confirm" id="t-confirm">Guardar</button>
       <button class="btn-cancel" id="t-cancel">Cancelar</button>
@@ -685,12 +685,12 @@
   <div id="panel-horario" class="panel hidden">
     <div id="h-form-wrap">
       <h2>Bloquear un horario</h2>
-      <div class="field"><label>Día</label><input type="date" id="h-fecha"></div>
+      <div class="field"><label for="h-fecha">Día</label><input type="date" id="h-fecha"></div>
       <div class="field-row">
-        <div class="field"><label>Desde</label><input type="time" id="h-inicio" step="900"></div>
-        <div class="field"><label>Hasta</label><input type="time" id="h-fin" step="900"></div>
+        <div class="field"><label for="h-inicio">Desde</label><input type="time" id="h-inicio" step="900"></div>
+        <div class="field"><label for="h-fin">Hasta</label><input type="time" id="h-fin" step="900"></div>
       </div>
-      <div class="field"><label>Motivo (opcional)</label><input type="text" id="h-motivo"></div>
+      <div class="field"><label for="h-motivo">Motivo (opcional)</label><input type="text" id="h-motivo"></div>
       <div class="panel-actions">
         <button class="btn-confirm" id="h-confirm">Bloquear</button>
         <button class="btn-cancel" id="h-cancel">Cancelar</button>
@@ -710,14 +710,14 @@
   <div id="panel-mover" class="panel hidden">
     <h2>Editar turno</h2>
     <div class="field-row">
-      <div class="field"><label>Nombre</label><input type="text" id="m-nombre"></div>
-      <div class="field"><label>Apellido</label><input type="text" id="m-apellido"></div>
+      <div class="field"><label for="m-nombre">Nombre</label><input type="text" id="m-nombre"></div>
+      <div class="field"><label for="m-apellido">Apellido</label><input type="text" id="m-apellido"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Nueva fecha</label><input type="date" id="m-fecha"></div>
-      <div class="field"><label>Nueva hora</label><input type="time" id="m-hora" step="900"></div>
+      <div class="field"><label for="m-fecha">Nueva fecha</label><input type="date" id="m-fecha"></div>
+      <div class="field"><label for="m-hora">Nueva hora</label><input type="time" id="m-hora" step="900"></div>
     </div>
-    <div class="field"><label>Motivo</label><input type="text" id="m-motivo"></div>
+    <div class="field"><label for="m-motivo">Motivo</label><input type="text" id="m-motivo"></div>
     <div class="panel-actions">
       <button class="btn-confirm" id="m-confirm">Guardar</button>
       <button class="btn-cancel" id="m-cancel">Cancelar</button>
@@ -728,8 +728,8 @@
   <div id="panel-bloqueo-dia" class="panel hidden">
     <div id="b-form-wrap">
       <h2>Bloquear un día completo</h2>
-      <div class="field"><label>Día</label><input type="date" id="b-fecha"></div>
-      <div class="field"><label>Motivo (opcional)</label><input type="text" id="b-motivo"></div>
+      <div class="field"><label for="b-fecha">Día</label><input type="date" id="b-fecha"></div>
+      <div class="field"><label for="b-motivo">Motivo (opcional)</label><input type="text" id="b-motivo"></div>
       <div class="panel-actions">
         <button class="btn-confirm" id="b-confirm">Bloquear</button>
         <button class="btn-cancel" id="b-cancel">Cancelar</button>
@@ -773,15 +773,15 @@
         <h2 id="paci-perfil-titulo">Paciente</h2>
         <div id="paci-ficha-estado" class="paci-ficha-estado"></div>
         <div class="field-row">
-          <div class="field"><label>Nombre</label><input type="text" id="paci-nombre"></div>
-          <div class="field"><label>Apellido</label><input type="text" id="paci-apellido"></div>
+          <div class="field"><label for="paci-nombre">Nombre</label><input type="text" id="paci-nombre"></div>
+          <div class="field"><label for="paci-apellido">Apellido</label><input type="text" id="paci-apellido"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>DNI</label><input type="text" id="paci-dni"></div>
-          <div class="field"><label>Teléfono</label><input type="text" id="paci-telefono"></div>
+          <div class="field"><label for="paci-dni">DNI</label><input type="text" id="paci-dni"></div>
+          <div class="field"><label for="paci-telefono">Teléfono</label><input type="text" id="paci-telefono"></div>
         </div>
         <div class="field-row">
-          <div class="field full"><label>Correo electrónico</label><input type="email" id="paci-email"></div>
+          <div class="field full"><label for="paci-email">Correo electrónico</label><input type="email" id="paci-email"></div>
         </div>
         <div class="field-row">
           <button class="action-btn primary" id="paci-guardar">Guardar datos</button>

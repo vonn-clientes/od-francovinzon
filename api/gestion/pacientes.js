@@ -16,7 +16,7 @@ import {
 } from '../../lib/googleCalendar.js';
 import {
   PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, BACKUP_FOLDER_NAME, SHEET_NAME,
-  FORMA_PAGO_COLUMN_INDEX, CAMPO_CELDA, CAMPOS_ORDENADOS, rangoMovimientos,
+  FORMA_PAGO_COLUMN_INDEX, CAMPO_CELDA, CAMPOS_ORDENADOS, rangoMovimientos, rangoMonedaMovimientos, rangoMonedaFila,
   rangoPrestacionesObraSocial, primeraFilaLibre, esCeldaConDatoReal,
   MOVIMIENTOS_FILA_INICIO, MOVIMIENTOS_FILA_FIN,
   nombreArchivo, parsearNombreArchivo,
@@ -150,6 +150,7 @@ export default async function handler(req, res) {
       }
       if (req.query.modo === 'listar') return await listar(req, res);
       if (req.query.modo === 'ficha') return await obtenerFicha(req, res);
+      if (req.query.modo === 'dolar-blue') return await obtenerDolarBlue(req, res);
       if (req.query.modo === 'modified') return await obtenerModified(req, res);
       if (req.query.modo === 'telefono-turnos') return await telefonoDesdeTurnos(req, res);
       if (req.query.modo === 'telefono') return await obtenerTelefonoFicha(req, res);
@@ -412,6 +413,31 @@ function celdaTextoLimpia(valor) {
   return valor || '';
 }
 
+// ---- Cotización del dólar blue (promedio compra/venta) para la cuenta en dólares ----
+// ArgentinaDatos (sin auth), mismo origen que usa el admin. Se cachea 6 h en memoria.
+let cacheDolarBlue = null; // { lista, ts }
+async function historicoDolarBlue() {
+  if (cacheDolarBlue && Date.now() - cacheDolarBlue.ts < 6 * 60 * 60 * 1000) return cacheDolarBlue.lista;
+  const r = await fetch('https://api.argentinadatos.com/v1/cotizaciones/dolares/blue');
+  if (!r.ok) throw new Error(`ArgentinaDatos respondió ${r.status}`);
+  const lista = (await r.json()).filter((x) => x.fecha && x.compra > 0 && x.venta > 0).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  cacheDolarBlue = { lista, ts: Date.now() };
+  return lista;
+}
+async function obtenerDolarBlue(req, res) {
+  try {
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+    const fecha = /^\d{4}-\d{2}-\d{2}$/.test(req.query.fecha || '') ? req.query.fecha : hoy;
+    const lista = await historicoDolarBlue();
+    let item = null;
+    for (let i = lista.length - 1; i >= 0; i--) { if (lista[i].fecha <= fecha) { item = lista[i]; break; } }
+    if (!item) return res.status(200).json({ success: false, message: 'Sin cotización para esa fecha.' });
+    res.status(200).json({ success: true, fecha: item.fecha, compra: item.compra, venta: item.venta, promedio: Math.round(((item.compra + item.venta) / 2) * 100) / 100 });
+  } catch (err) {
+    res.status(200).json({ success: false, message: err?.message || String(err) });
+  }
+}
+
 async function obtenerFicha(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Falta id.' });
@@ -421,7 +447,7 @@ async function obtenerFicha(req, res) {
 
   await intentarRecuperarRespaldos(sheets, drive, id);
 
-  const [campos, financiero, movRaw, presRaw, meta] = await Promise.all([
+  const [campos, financiero, movRaw, presRaw, meta, monedaRaw] = await Promise.all([
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C5:C15` })),
     // Columna E también: "AL DÍA"/"DEBE $X" vive en una celda combinada E9:F10 — el
     // valor solo está en la celda ancla E9, F9 devuelve vacío (ver decisions.md).
@@ -429,7 +455,10 @@ async function obtenerFicha(req, res) {
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoMovimientos() })),
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoPrestacionesObraSocial() })),
     conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime, name' })),
+    // Cuenta en dólares (columnas N:Q). Si falla, la ficha abre igual como siempre.
+    conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoMonedaMovimientos() })).catch(() => ({ data: { values: [] } })),
   ]);
+  const monedaFilas = monedaRaw.data.values || [];
 
   const c = (campos.data.values || []).map((r) => (r[0] != null ? String(r[0]) : ''));
   while (c.length < 11) c.push('');
@@ -451,6 +480,10 @@ async function obtenerFicha(req, res) {
       haber: row[3] || '',
       saldo: row[4] || '',
       formaPago: row[6] || '',
+      monedaDebe: (monedaFilas[i] || [])[0] || '',
+      monedaHaber: (monedaFilas[i] || [])[1] || '',
+      aplicaA: (monedaFilas[i] || [])[2] || '',
+      cotizacion: (monedaFilas[i] || [])[3] || '',
     }))
     .filter((m) => m.fecha || m.tratamiento || m.debe || m.haber)
     .map((m) => ({ ...m, anulado: /^\[ANULADO\]/.test(m.tratamiento) }));
@@ -955,14 +988,21 @@ async function fusionarPacientes(req, res) {
 
   // 2. Migrar movimientos de la ficha que se va, al final de los que ya tiene la que queda.
   const { data: movData } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: idEliminar, range: rangoMovimientos() }));
-  const movimientos = (movData.values || []).filter((row) => row[0] || row[1] || row[2] || row[3]);
+  const { data: monData } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: idEliminar, range: rangoMonedaMovimientos() })).catch(() => ({ data: { values: [] } }));
+  const monedasOrigen = monData.values || [];
+  const movimientos = (movData.values || [])
+    .map((row, i) => Object.assign(row, { moneda: monedasOrigen[i] || [] }))
+    .filter((row) => row[0] || row[1] || row[2] || row[3]);
   if (movimientos.length) {
     const { data: destinoMov } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: idMantener, range: rangoMovimientos() }));
     let fila = primeraFilaLibre(destinoMov.values || []);
     for (const row of movimientos) {
       const [fecha, tratamiento, debe, haber, , , formaPago] = row;
       await confirmarFilaLibre(sheets, idMantener, fila, false);
-      await escribirMovimientoEnFila(idMantener, fila, { fecha, tratamiento, debe, haber, formaPago });
+      await escribirMovimientoEnFila(idMantener, fila, {
+        fecha, tratamiento, debe, haber, formaPago,
+        monedaDebe: row.moneda[0] || '', monedaHaber: row.moneda[1] || '', aplicaA: row.moneda[2] || '', cotizacion: row.moneda[3] || '',
+      });
       fila += 1;
     }
   }
@@ -988,7 +1028,8 @@ async function fusionarPacientes(req, res) {
 }
 
 async function movimientoAgregar(req, res) {
-  const { id, fecha, tratamiento, debe, haber, formaPago } = req.body;
+  const { id, fecha, tratamiento, debe, haber, formaPago, monedaDebe, monedaHaber, aplicaA, cotizacion } = req.body;
+  const moneda = { monedaDebe, monedaHaber, aplicaA, cotizacion };
   // Fecha obligatoria para movimientos NUEVOS (ver el pedido, 2026-08-20) — elimina la
   // posibilidad de que exista una fila con datos reales pero sin fecha, que fue
   // justamente el patrón que causó el incidente de Karen Schneider. No aplica a editar
@@ -1009,7 +1050,7 @@ async function movimientoAgregar(req, res) {
   }
 
   try {
-    await escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, haber, formaPago });
+    await escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, haber, formaPago, ...moneda });
     // Confirmación automática (best-effort): solo cuando hay una fecha y contenido real
     // (un movimiento nuevo es "el paciente vino ese día" — ver decisions.md 2026-08-25).
     const fechaISO = fechaMovimientoAISO(fecha || '');
@@ -1019,7 +1060,7 @@ async function movimientoAgregar(req, res) {
     res.status(200).json({ success: true, fila });
   } catch (err) {
     console.error(err);
-    await respaldarCambioFallido(id, 'movimiento-agregar', { fecha, tratamiento, debe, haber, formaPago });
+    await respaldarCambioFallido(id, 'movimiento-agregar', { fecha, tratamiento, debe, haber, formaPago, ...moneda });
     await avisarFallo({ endpoint: 'api/gestion/pacientes.js', detalle: 'movimiento-agregar, respaldado', error: err });
     // fila incluida igual que en el caso feliz: el autosave (2026-08-25) la necesita
     // para seguir EDITANDO esa misma fila en la próxima tecla — si no, cada keystroke
@@ -1029,11 +1070,12 @@ async function movimientoAgregar(req, res) {
 }
 
 async function movimientoEditar(req, res) {
-  const { id, fila, fecha, tratamiento, debe, haber, formaPago, confirmarAuto } = req.body;
+  const { id, fila, fecha, tratamiento, debe, haber, formaPago, confirmarAuto, monedaDebe, monedaHaber, aplicaA, cotizacion } = req.body;
+  const moneda = { monedaDebe, monedaHaber, aplicaA, cotizacion };
   if (!id || !fila) return res.status(400).json({ success: false, message: 'Falta fila.' });
 
   try {
-    await escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, haber, formaPago });
+    await escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, haber, formaPago, ...moneda });
     // Confirmación automática solo cuando el front avisa que la FECHA cambió en esta
     // edición (confirmarAuto: true) — cubre "editar un movimiento y moverlo a otro día".
     if (confirmarAuto) {
@@ -1045,13 +1087,28 @@ async function movimientoEditar(req, res) {
     res.status(200).json({ success: true });
   } catch (err) {
     console.error(err);
-    await respaldarCambioFallido(id, 'movimiento-editar', { fila, fecha, tratamiento, debe, haber, formaPago });
+    await respaldarCambioFallido(id, 'movimiento-editar', { fila, fecha, tratamiento, debe, haber, formaPago, ...moneda });
     await avisarFallo({ endpoint: 'api/gestion/pacientes.js', detalle: 'movimiento-editar, respaldado', error: err });
     res.status(200).json({ success: true, pendiente: true });
   }
 }
 
-async function escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, haber, formaPago }) {
+// Moneda de una fila (cuenta en dólares): solo 'USD' / 'ARS' son válidos, lo demás queda vacío.
+const monedaValida = (v) => (v === 'USD' || v === 'ARS' ? v : '');
+async function escribirMonedaEnFila(id, fila, { monedaDebe, monedaHaber, aplicaA, cotizacion }) {
+  // undefined en los cuatro = el front no maneja dólares para esta ficha: no se toca nada.
+  if ([monedaDebe, monedaHaber, aplicaA, cotizacion].every((v) => v === undefined)) return;
+  const cot = Number(cotizacion);
+  const sheets = getPacientesSheetsClient();
+  await conReintentos(() => sheets.spreadsheets.values.update({
+    spreadsheetId: id,
+    range: rangoMonedaFila(fila),
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[monedaValida(monedaDebe), monedaValida(monedaHaber), monedaValida(aplicaA), cot > 0 ? cot : '']] },
+  }));
+}
+
+async function escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, haber, formaPago, monedaDebe, monedaHaber, aplicaA, cotizacion }) {
   const sheets = getPacientesSheetsClient();
   await asegurarColumnaFormaPago(id);
   await conReintentos(() => sheets.spreadsheets.values.update({
@@ -1066,6 +1123,7 @@ async function escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, ha
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [[aMayusculas(formaPago) || '']] },
   }));
+  await escribirMonedaEnFila(id, fila, { monedaDebe, monedaHaber, aplicaA, cotizacion });
 }
 
 // Lógica compartida de anulación: relee la fila y, si todavía no está anulada, la marca
@@ -1138,6 +1196,7 @@ async function movimientoLimpiar(req, res) {
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [['']] },
     }));
+    await escribirMonedaEnFila(id, fila, { monedaDebe: '', monedaHaber: '', aplicaA: '', cotizacion: '' });
     res.status(200).json({ success: true });
   } catch (err) {
     console.error(err);
@@ -1454,6 +1513,7 @@ async function intentarRecuperarRespaldos(sheets, drive, pacienteId) {
           valueInputOption: 'USER_ENTERED',
           requestBody: { values: [['']] },
         }));
+        await escribirMonedaEnFila(pacienteId, payload.fila, { monedaDebe: '', monedaHaber: '', aplicaA: '', cotizacion: '' });
       } else if (accion === 'prestacion-agregar') {
         const { data: pres } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: pacienteId, range: rangoPrestacionesObraSocial() }));
         const fila = primeraFilaLibre(pres.values || []);

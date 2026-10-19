@@ -592,6 +592,17 @@
         <div class="field"><label>Debe (tratamiento)</label><input type="number" id="mov-debe" min="0" step="0.01"></div>
         <div class="field"><label>Haber (pago)</label><input type="number" id="mov-haber" min="0" step="0.01"></div>
       </div>
+      <a href="#" id="mov-usar-dolares" style="font-size:12px;color:var(--muted);">Usar dólares en este movimiento</a>
+      <div id="mov-dolar-wrap" class="hidden">
+        <div class="field-row">
+          <div class="field"><label>Debe en</label><select id="mov-moneda-debe"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></div>
+          <div class="field"><label>Pago en</label><select id="mov-moneda-haber"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>El pago cancela deuda en</label><select id="mov-aplica"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></div>
+          <div class="field hidden" id="mov-cot-wrap"><label>Dólar blue (promedio)</label><input type="number" id="mov-cotizacion" min="0" step="0.01"></div>
+        </div>
+      </div>
       <div class="mov-tipo-hint" id="mov-tipo-hint"></div>
       <div class="field-row">
         <div class="field full" id="mov-forma-pago-wrap"><label>Forma de pago</label><input type="text" id="mov-forma-pago" placeholder="Ej: Efectivo, MP, Transferencia"></div>
@@ -1584,6 +1595,13 @@
     document.getElementById('fin-total').textContent = fin.total;
     document.getElementById('fin-pagado').textContent = fin.pagado;
     document.getElementById('fin-saldo').textContent = fin.saldo;
+    if (cuentaEnDolares(fichaActual.movimientos)) {
+      const cu = calcularCuentas(fichaActual.movimientos, cotizacionBlueHoy);
+      document.getElementById('fin-saldo').textContent = `${formatoImporte(cu.ARS.saldo)} · ${formatoUsd(cu.USD.saldo)}`;
+      document.getElementById('fin-total').textContent = `${formatoImporte(cu.ARS.debe)} · ${formatoUsd(cu.USD.debe)}`;
+      document.getElementById('fin-pagado').textContent = `${formatoImporte(cu.ARS.pagado)} · ${formatoUsd(cu.USD.pagado)}`;
+      if (!cotizacionBlueHoy) cargarDolarBlue().then(() => { if (cotizacionBlueHoy) renderFicha(); });
+    }
     const estadoEl = document.getElementById('fin-estado');
     const alDia = /AL DÍA/i.test(fin.alDiaTexto);
     estadoEl.textContent = fin.alDiaTexto || '—';
@@ -1634,12 +1652,62 @@
   }
   // El saldo se recalcula acá en el orden de fecha mostrado (Debe - Haber acumulado), para
   // que siempre refleje lo que realmente se debe aunque se cargue un movimiento con fecha vieja.
-  function movimientosConSaldo(lista) {
-    let acum = 0;
-    return ordenarPorFecha(lista).map((m) => {
-      if (!m.anulado) acum += numeroImporte(m.debe) - numeroImporte(m.haber);
-      return { ...m, saldo: formatoImporte(acum) };
+  // ---- Cuenta en dólares: solo se activa en fichas que tienen algún movimiento en USD ----
+  function formatoUsd(n) { return formatoImporte(n).replace('$', 'US$'); }
+  function cuentaEnDolares(movs) {
+    return (movs || []).some((m) => !m.anulado && (m.monedaDebe === 'USD' || m.monedaHaber === 'USD' || m.aplicaA === 'USD'));
+  }
+  // Devuelve cuánto suma a la deuda y cuánto cancela cada movimiento, por moneda.
+  // Un pago en otra moneda se convierte con la cotización congelada de esa fila.
+  function efectoMov(m, cotFallback) {
+    const debe = numeroImporte(m.debe), haber = numeroImporte(m.haber);
+    const mDebe = m.monedaDebe === 'USD' ? 'USD' : 'ARS';
+    const mHab = m.monedaHaber === 'USD' ? 'USD' : 'ARS';
+    const destino = m.aplicaA === 'USD' || m.aplicaA === 'ARS' ? m.aplicaA : mHab;
+    const cot = Number(m.cotizacion) > 0 ? Number(m.cotizacion) : (cotFallback || 0);
+    let acreditado = haber;
+    if (mHab !== destino) {
+      if (!cot) acreditado = 0;
+      else acreditado = mHab === 'ARS' ? haber / cot : haber * cot;
+    }
+    return { mDebe, debe, destino, acreditado };
+  }
+  function calcularCuentas(movs, cotFallback) {
+    const c = { ARS: { debe: 0, pagado: 0 }, USD: { debe: 0, pagado: 0 } };
+    (movs || []).forEach((m) => {
+      if (m.anulado) return;
+      const e = efectoMov(m, cotFallback);
+      c[e.mDebe].debe += e.debe;
+      c[e.destino].pagado += e.acreditado;
     });
+    c.ARS.saldo = c.ARS.debe - c.ARS.pagado;
+    c.USD.saldo = c.USD.debe - c.USD.pagado;
+    return c;
+  }
+  function movimientosConSaldo(lista) {
+    const dual = cuentaEnDolares(lista);
+    let acum = 0, acumArs = 0, acumUsd = 0;
+    return ordenarPorFecha(lista).map((m) => {
+      if (!m.anulado) {
+        if (dual) {
+          const e = efectoMov(m, cotizacionBlueHoy);
+          if (e.mDebe === 'USD') acumUsd += e.debe; else acumArs += e.debe;
+          if (e.destino === 'USD') acumUsd -= e.acreditado; else acumArs -= e.acreditado;
+        } else {
+          acum += numeroImporte(m.debe) - numeroImporte(m.haber);
+        }
+      }
+      const saldo = dual ? `${formatoImporte(acumArs)} · ${formatoUsd(acumUsd)}` : formatoImporte(acum);
+      return { ...m, saldo };
+    });
+  }
+  let cotizacionBlueHoy = 0;
+  async function cargarDolarBlue() {
+    try {
+      const r = await apiGet({ modo: 'dolar-blue' });
+      if (r && r.success && r.promedio) cotizacionBlueHoy = Number(r.promedio);
+    } catch (e) { /* sin cotización: el usuario puede escribirla */ }
+    return cotizacionBlueHoy;
   }
 
   function renderMovimientos() {
@@ -1652,8 +1720,8 @@
       <tr class="${m.anulado ? 'anulado' : ''}" data-fila="${m.fila}">
         <td>${escapeHtml(m.fecha)}</td>
         <td>${escapeHtml(m.tratamiento)}</td>
-        <td class="num">${escapeHtml(m.debe)}</td>
-        <td class="num">${escapeHtml(m.haber)}</td>
+        <td class="num">${escapeHtml(m.monedaDebe === 'USD' ? String(m.debe || '').replace('$', 'US$') : m.debe)}</td>
+        <td class="num">${escapeHtml(m.monedaHaber === 'USD' ? String(m.haber || '').replace('$', 'US$') : m.haber)}</td>
         <td class="num">${escapeHtml(m.saldo)}</td>
         <td>${escapeHtml(m.formaPago)}</td>
         <td>
@@ -1758,6 +1826,29 @@
   const movDebe = document.getElementById('mov-debe');
   const movHaber = document.getElementById('mov-haber');
   const movFormaPago = document.getElementById('mov-forma-pago');
+  const movDolarWrap = document.getElementById('mov-dolar-wrap');
+  const movMonedaDebe = document.getElementById('mov-moneda-debe');
+  const movMonedaHaber = document.getElementById('mov-moneda-haber');
+  const movAplica = document.getElementById('mov-aplica');
+  const movCotizacion = document.getElementById('mov-cotizacion');
+  const movCotWrap = document.getElementById('mov-cot-wrap');
+  const movUsarDolares = document.getElementById('mov-usar-dolares');
+  // Muestra/oculta la cotización según haga falta convertir (pago en moneda distinta a la deuda).
+  async function actualizarCotizacionMov() {
+    const necesita = !movDolarWrap.classList.contains('hidden') && movMonedaHaber.value !== movAplica.value;
+    movCotWrap.classList.toggle('hidden', !necesita);
+    if (necesita && !movCotizacion.value) {
+      const cot = cotizacionBlueHoy || await cargarDolarBlue();
+      if (cot && !movCotizacion.value) { movCotizacion.value = cot; programarAutosaveMov(); }
+    }
+  }
+  function mostrarDolaresMov(mostrar) {
+    movDolarWrap.classList.toggle('hidden', !mostrar);
+    movUsarDolares.classList.toggle('hidden', mostrar);
+  }
+  movUsarDolares.addEventListener('click', (ev) => { ev.preventDefault(); mostrarDolaresMov(true); actualizarCotizacionMov(); });
+  movMonedaHaber.addEventListener('change', () => { movAplica.value = movMonedaHaber.value; actualizarCotizacionMov(); });
+  movAplica.addEventListener('change', () => { movCotizacion.value = ''; actualizarCotizacionMov(); });
   const movMsg = document.getElementById('mov-msg');
   const movTipoHint = document.getElementById('mov-tipo-hint');
   // "Tratamiento" de movimientos pasa a Title Case (como los campos de ficha, ver
@@ -1851,6 +1942,10 @@
       movDebe.value = montoSheetANumero(mov.debe);
       movHaber.value = montoSheetANumero(mov.haber);
       movFormaPago.value = mov.formaPago || '';
+      movMonedaDebe.value = mov.monedaDebe === 'USD' ? 'USD' : 'ARS';
+      movMonedaHaber.value = mov.monedaHaber === 'USD' ? 'USD' : 'ARS';
+      movAplica.value = mov.aplicaA || movMonedaHaber.value;
+      movCotizacion.value = mov.cotizacion || '';
     } else {
       document.getElementById('mov-form-titulo').textContent = entrega ? 'Entrega de dinero' : (cargaHistorica ? 'Carga histórica' : 'Nuevo movimiento');
       movFecha.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
@@ -1859,7 +1954,11 @@
       movDebe.value = '';
       movHaber.value = '';
       movFormaPago.value = '';
+      movMonedaDebe.value = 'ARS'; movMonedaHaber.value = 'ARS'; movAplica.value = 'ARS'; movCotizacion.value = '';
     }
+    // Fichas con dólares: el bloque ya viene abierto. Las demás lo ven como un link chico.
+    mostrarDolaresMov(cuentaEnDolares(fichaActual.movimientos) || movMonedaDebe.value === 'USD' || movMonedaHaber.value === 'USD');
+    actualizarCotizacionMov();
     // Solo se muestra al cargar un movimiento NUEVO desde "Carga histórica" — al editar
     // una fila vieja ya sin fecha (protegida por el fix de primeraFilaLibre(), ver
     // decisions.md) no hace falta inventarle ninguna.
@@ -1926,6 +2025,20 @@
       debe: movDebe.value ? Number(movDebe.value) : 0,
       haber,
       formaPago: movFormaPago.value.trim(),
+      ...datosDolarMov(),
+    };
+  }
+  // Solo se envían los campos de dólares si el bloque está visible: así las fichas que no
+  // usan dólares nunca tocan esas columnas.
+  function datosDolarMov() {
+    if (movDolarWrap.classList.contains('hidden')) return {};
+    const mHab = movMonedaHaber.value, destino = movAplica.value;
+    const necesitaCot = mHab !== destino;
+    return {
+      monedaDebe: movMonedaDebe.value,
+      monedaHaber: mHab,
+      aplicaA: necesitaCot ? destino : '',
+      cotizacion: necesitaCot && movCotizacion.value ? Number(movCotizacion.value) : '',
     };
   }
   // "Tiene contenido real" = se escribió tratamiento, un monto o la forma de pago. Solo
@@ -2013,8 +2126,8 @@
       // actualizaría el turno correspondiente (pedido 2026-08-25).
       const fechaCambio = !!(filaDestino && movFechaGuardada && d.fecha && d.fecha !== movFechaGuardada);
       const r = filaDestino
-        ? await apiPost({ accion: 'movimiento-editar', id: idFicha, fila: filaDestino, fecha: fechaSheet, tratamiento: d.tratamiento, debe: d.debe, haber: d.haber, formaPago: d.formaPago, confirmarAuto: fechaCambio })
-        : await apiPost({ accion: 'movimiento-agregar', id: idFicha, fecha: fechaSheet, tratamiento: d.tratamiento, debe: d.debe, haber: d.haber, formaPago: d.formaPago });
+        ? await apiPost({ accion: 'movimiento-editar', id: idFicha, fila: filaDestino, fecha: fechaSheet, tratamiento: d.tratamiento, debe: d.debe, haber: d.haber, formaPago: d.formaPago, monedaDebe: d.monedaDebe, monedaHaber: d.monedaHaber, aplicaA: d.aplicaA, cotizacion: d.cotizacion, confirmarAuto: fechaCambio })
+        : await apiPost({ accion: 'movimiento-agregar', id: idFicha, fecha: fechaSheet, tratamiento: d.tratamiento, debe: d.debe, haber: d.haber, formaPago: d.formaPago, monedaDebe: d.monedaDebe, monedaHaber: d.monedaHaber, aplicaA: d.aplicaA, cotizacion: d.cotizacion });
       if (r.success) movFechaGuardada = d.fecha;
       if (r.success) {
         // El guardado en sí siempre se completa (para no perder lo tipeado), pero la
@@ -2037,7 +2150,7 @@
     clearTimeout(movAutosaveTimer);
     movAutosaveTimer = setTimeout(autosaveMovAhora, 1200);
   }
-  [movFecha, movTratamiento, movDebe, movHaber, movFormaPago].forEach((el) => {
+  [movFecha, movTratamiento, movDebe, movHaber, movFormaPago, movMonedaDebe, movMonedaHaber, movAplica, movCotizacion].forEach((el) => {
     el.addEventListener('input', programarAutosaveMov);
     el.addEventListener('change', programarAutosaveMov);
   });

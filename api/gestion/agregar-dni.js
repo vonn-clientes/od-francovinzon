@@ -5,6 +5,7 @@
 // lee la description del evento, parchea (o agrega) la línea "DNI: ...", guarda.
 import { getCalendarClient, isValidGestionKey, extraerTelefono } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
+import { formatearDniConPuntos } from '../../lib/dni.js';
 import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 
 export default async function handler(req, res) {
@@ -21,7 +22,7 @@ export default async function handler(req, res) {
   // Vacío = borrar el DNI (mismo criterio que agregar-telefono.js) — no es obligatorio,
   // así que se permite dejarlo en blanco de nuevo si se cargó por error.
   const crudo = (dni || '').trim().replace(/[.\s]/g, '');
-  const valorGuardar = crudo || '-';
+  const valorGuardar = formatearDniConPuntos(crudo) || '-';
 
   try {
     const calendar = getCalendarClient();

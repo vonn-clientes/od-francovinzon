@@ -4,6 +4,7 @@ import {
   generarCodigoCorto, extraerCodigoCorto,
 } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
+import { formatearDniConPuntos } from '../../lib/dni.js';
 import { conReintentos } from '../../lib/retry.js';
 import { aTituloCase } from '../../lib/pacientesSheet.js';
 import { obtenerHorariosConfig, logActividad } from '../../lib/adminConfig.js';
@@ -87,7 +88,7 @@ export default async function handler(req, res) {
     const description =
       `Teléfono: ${telNormalizado || '-'}\n` +
       (telNormalizado ? 'Teléfono verificado: Sí\n' : '') +
-      `DNI: ${dni || '-'}\n` +
+      `DNI: ${formatearDniConPuntos(dni) || '-'}\n` +
       `Email: ${email || '-'}\n` +
       `Motivo: ${motivo}\n` +
       `Paciente nuevo: ${esNuevo ? 'Sí' : 'No'}\n` +

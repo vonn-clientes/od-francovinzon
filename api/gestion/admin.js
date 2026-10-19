@@ -498,6 +498,8 @@ function snapshotCompleto(nombre, data) {
     if (data?.totalFichasEscaneadas == null) return false;
     if (!Number.isFinite(Number(data?.totalFichasEscaneadas))) return false;
     if (data?.pacientesTotales?.total == null) return false;
+    if (!data?.deuda || data.deuda.success === false) return false;
+    if (!data?.publico || !snapshotCompleto('perfil', data.publico)) return false;
   }
   if (nombre === 'perfil') {
     const fallidas = (data?.filas || []).find((f) => f[0] === 'Resumen' && f[1] === 'Fichas que no se pudieron leer');
@@ -1203,6 +1205,27 @@ async function getMetricasAvanzadas(req, res) {
     return { total: null, totalFichas: null, totalSoloTurno: null, fichas: [], soloTurno: [], error: err?.message || String(err) };
   });
 
+  // Deuda, finanzas y público objetivo comparten el escaneo iniciado por
+  // calcularFinanzasPacientes. Mantenerlos en esta misma invocación evita que el
+  // navegador abra tres recorridos independientes por cientos de planillas.
+  let deuda;
+  try {
+    deuda = { success: true, ...(await calcularDeuda(false)), fichasFallidas: (await escanearFichasAdmin()).fallidos };
+  } catch (err) {
+    errores.push(`deuda: ${err?.message || err}`);
+    deuda = { success: false, error: err?.message || String(err) };
+  }
+  let publico;
+  try {
+    publico = await new Promise((resolve, reject) => {
+      const falsoRes = { status() { return falsoRes; }, json(data) { resolve(data); return falsoRes; } };
+      Promise.resolve(calcularPerfilJson({ query: {} }, falsoRes)).catch(reject);
+    });
+  } catch (err) {
+    errores.push(`público objetivo: ${err?.message || err}`);
+    publico = { success: false, error: err?.message || String(err), filas: [] };
+  }
+
   res.status(200).json({
     ...(errores.length ? { errores } : {}),
     ocupacion: { actual: ocupacionActual, siguiente: ocupacionSiguiente },
@@ -1212,6 +1235,8 @@ async function getMetricasAvanzadas(req, res) {
     ticketPorAnio: finanzas.ticketPorAnio,
     dolarError: finanzas.dolarError || null,
     pacientesTotales,
+    deuda,
+    publico,
     fichasFallidas: finanzas.fichasFallidas,
     totalFichasEscaneadas: finanzas.totalFichasEscaneadas,
   });

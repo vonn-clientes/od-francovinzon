@@ -611,7 +611,6 @@
         // cientos de fichas ni el perfil de audiencia.
         await Promise.all([cargarDashboard(), cargarPacientesTotales(), cargarSinFicha()]);
         await cargarDashboardAvanzado();
-        await cargarPublico();
       },
       'reserva-online': cargarReservaOnline,
       horarios: cargarHorarios, textos: cargarTextos,
@@ -686,7 +685,6 @@
       // api/gestion/admin.js) — si pasó, se muestra acá el motivo real en vez de
       // dejarlo invisible en los logs de Vercel.
       setMsg('dash-msg', (m.errores || []).join(' · '), m.errores?.length ? 'error' : '');
-      if (m.totalPacientesConSaldo == null) cargarDeuda(forzar);
     } catch (e) {
       if (e.message !== 'unauthorized') {
         document.getElementById('dash-stats').innerHTML = '<p class="hint">No se pudo cargar el resumen de turnos.</p>';
@@ -767,14 +765,14 @@
   // ---------- Público objetivo (buyer persona) ----------
   // Los datos vienen de "filas" = [sección, categoría, detalle, cantidad, % dentro de la sección]
   // (mismo perfil anónimo del export). Todo se arma acá en el navegador.
-  async function cargarPublico(forzar) {
+  async function cargarPublico(forzar, datosCompartidos) {
     document.getElementById('pub-persona').innerHTML = '<p class="hint">Cargando público objetivo…</p>';
     document.getElementById('pub-segmentos').innerHTML = '';
     document.getElementById('pub-resumen').innerHTML = '';
     document.getElementById('pub-secciones').innerHTML = '';
     setMsg('pub-msg', '', '');
     try {
-      const m = await apiGet('publico-objetivo', forzar ? { forzar: 1 } : {});
+      const m = datosCompartidos || await apiGet('publico-objetivo', forzar ? { forzar: 1 } : {});
       if (m.success === false) throw new Error(m.error || 'sin datos');
       const el = document.getElementById('pub-generado');
       if (m.generadoEn) {
@@ -887,6 +885,10 @@
     try {
       const m = await apiGet('metricas-avanzadas', forzar ? { forzar: 1 } : {});
       mostrarGenerado(m);
+
+      if (m.deuda?.success) renderDeuda(m.deuda);
+      else if (m.deuda?.error) setMsg('dash-msg', `No se pudieron calcular los saldos: ${m.deuda.error}`, 'error');
+      if (m.publico) cargarPublico(false, m.publico);
 
       // (a) Ocupación
       const nombreMes = (o) => o ? new Date(o.anio, o.mes - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : '';

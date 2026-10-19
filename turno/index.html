@@ -314,5 +314,18 @@
 </script>
 <link rel="stylesheet" href="/asistente.css">
 <script defer src="/asistente.js"></script>
+
+<script>
+// DNI: se escribe con o sin puntos, siempre queda "12.345.678" (solo cuentan los números).
+document.addEventListener('input', (ev) => {
+  const el = ev.target;
+  if (!el.matches || !el.matches('input[data-campo="dni"], input[id*="dni" i]')) return;
+  const v = el.value;
+  if (/[^\d.\s]/.test(v)) return; // letras u otros símbolos: no se toca
+  const d = v.replace(/\D/g, '');
+  const f = d.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  if (f !== v) el.value = f;
+});
+</script>
 </body>
 </html>

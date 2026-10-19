@@ -1,3 +1,4 @@
+import { formatearDniConPuntos } from '../lib/dni.js';
 import {
   getCalendarClient, CALENDAR_ID, SOBRETURNOS_CALENDAR_ID, SLOT_MINUTES, TIME_ZONE,
   toArgDate, eventBounds, crearTurno, formatArgDay, formatArgTime,
@@ -70,11 +71,12 @@ async function buscarEmailGuardado(req, res) {
     if (!dniNorm || !telefono) return res.status(200).json({ email: null });
 
     const calendar = getCalendarClient();
-    const [principal, sobreturnos] = await Promise.all([
+    const [principal, principalPuntos, sobreturnos] = await Promise.all([
       conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, q: dniNorm, maxResults: 50, singleEvents: true })),
+      conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, q: formatearDniConPuntos(dniNorm), maxResults: 50, singleEvents: true })),
       conReintentos(() => calendar.events.list({ calendarId: SOBRETURNOS_CALENDAR_ID, q: dniNorm, maxResults: 50, singleEvents: true })),
     ]);
-    const candidatos = [...(principal.data.items || []), ...(sobreturnos.data.items || [])];
+    const candidatos = [...(principal.data.items || []), ...(principalPuntos.data.items || []), ...(sobreturnos.data.items || [])];
 
     for (const ev of candidatos) {
       const desc = ev.description || '';

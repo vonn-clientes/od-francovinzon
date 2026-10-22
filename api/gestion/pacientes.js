@@ -589,18 +589,47 @@ async function obtenerFicha(req, res) {
 // Copia espejo de solo lectura de las fichas: vive acá porque necesita los clientes
 // OAuth de Sheets/Drive y evita sumar otra función serverless al límite del plan Hobby.
 async function leerFichaSoloLectura(sheets, id) {
+  const ranges = [
+    `${SHEET_NAME}!C5:C15`,
+    `${SHEET_NAME}!E6:F11`,
+    rangoMovimientos(),
+    rangoMonedaMovimientos(),
+  ];
+  let values;
+  try {
+    const { data } = await conReintentos(() => sheets.spreadsheets.values.batchGet({ spreadsheetId: id, ranges }));
+    values = data.valueRanges;
+  } catch (err) {
+    const status = Number(err?.code ?? err?.response?.status ?? err?.status);
+    const reasons = [...(err?.errors || []), ...(err?.response?.data?.error?.errors || [])]
+      .map((e) => String(e?.reason || '').toLowerCase());
+    const message = String(err?.message || '').toLowerCase();
+    const esCuota = status === 429 || status === 403 && reasons.some((r) => ['ratelimitexceeded', 'userratelimitexceeded'].includes(r))
+      || reasons.some((r) => ['ratelimitexceeded', 'userratelimitexceeded'].includes(r))
+      || ['per minute per user', 'userratelimitexceeded', 'ratelimitexceeded'].some((s) => message.includes(s));
+    if (esCuota) throw err;
+    return leerFichaSoloLecturaSeparada(sheets, id);
+  }
+  const [campos, financiero, movRaw, monedaRaw] = values.map((r) => r.values || []);
+  return mapearFichaSoloLectura(campos, financiero, movRaw, monedaRaw);
+}
+
+async function leerFichaSoloLecturaSeparada(sheets, id) {
   const [campos, financiero, movRaw, monedaRaw] = await Promise.all([
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C5:C15` })),
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!E6:F11` })),
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoMovimientos() })),
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoMonedaMovimientos() })).catch(() => ({ data: { values: [] } })),
   ]);
-  const monedaFilas = monedaRaw.data.values || [];
-  const c = (campos.data.values || []).map((r) => (r[0] != null ? String(r[0]) : ''));
+  return mapearFichaSoloLectura(campos.data.values || [], financiero.data.values || [], movRaw.data.values || [], monedaRaw.data.values || []);
+}
+
+function mapearFichaSoloLectura(campos, financiero, movRaw, monedaFilas) {
+  const c = campos.map((r) => (r[0] != null ? String(r[0]) : ''));
   while (c.length < 11) c.push('');
   const [nombre, apellido, dni, fechaNacimiento, domicilio, localidad, obraSocial, nAfiliado, plan, telefono, planTratamiento] = c;
-  const f = financiero.data.values || [];
-  const movimientos = (movRaw.data.values || [])
+  const f = financiero;
+  const movimientos = movRaw
     .map((row, i) => ({
       fila: 18 + i, fecha: row[0] || '', tratamiento: row[1] || '', debe: row[2] || '',
       haber: row[3] || '', saldo: row[4] || '', formaPago: row[6] || '',

@@ -46,6 +46,7 @@ import { parsearReceta, camposFaltantes } from '../../lib/recetaParser.js';
 import { extraerUrlFirmaElectronica } from '../../lib/recetaFirmaQr.js';
 import { parsearImporteAR } from '../../lib/cuentaSaldo.js';
 import { crearClienteSupabase, construirPayload, sincronizarFichas, filtrarArchivosModificados, conTimeout } from '../../lib/sincronizarSupabase.js';
+import { clasificarEvento } from '../../lib/sincronizarTurnos.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -148,6 +149,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       if (req.query.modo === 'sync-supabase') return await sincronizarSupabaseModo(req, res);
+      if (req.query.modo === 'sync-turnos') return await sincronizarTurnosModo(req, res);
       if (!claveValida(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
       // Recálculo manual de asistencia (botón "Actualizar" de /gestion Pacientes) —
       // ?dryRun=1 para contar sin escribir, tandas con maxFichas/offset. El cron diario
@@ -727,6 +729,65 @@ async function sincronizarSupabaseModo(req, res) {
     // No registrar ni devolver datos de fichas ni credenciales ante un error global.
     return res.status(500).json({ error: 'No se pudo procesar la sincronización.' });
   }
+}
+
+async function sincronizarTurnosModo(req, res) {
+  if (!isValidAdminKey(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  const dryRun = req.query.dryRun === '1';
+  const parseDias = (valor, defecto) => {
+    const n = Number.parseInt(valor, 10);
+    return Number.isFinite(n) && n >= 0 ? Math.min(n, 730) : defecto;
+  };
+  const diasAtras = parseDias(req.query.dias_atras, 30);
+  const diasAdelante = parseDias(req.query.dias_adelante, 120);
+  const ahora = Date.now();
+  const desde = new Date(ahora - diasAtras * 86400000).toISOString();
+  const hasta = new Date(ahora + diasAdelante * 86400000).toISOString();
+  const inicio = Date.now();
+  const ventana = { desde, hasta };
+  const calendarios = [];
+  const errores = [];
+  let calendar;
+  try { calendar = getCalendarClient(); }
+  catch (error) { return res.status(500).json({ ok: false, dryRun, ventana, calendarios, duracionMs: Date.now() - inicio, errores: [{ mensaje: mensajeSeguro(error) }] }); }
+  const definiciones = [
+    { tipo: 'turno', id: CALENDAR_ID, permiteBloqueos: true },
+    { tipo: 'sobreturno', id: SOBRETURNOS_CALENDAR_ID, permiteBloqueos: false },
+  ];
+  const cliente = !dryRun && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
+    ? crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY }) : null;
+  if (!dryRun && !cliente) return res.status(500).json({ error: 'Falta configuración de Supabase.' });
+  for (const def of definiciones) {
+    const row = { tipo: def.tipo, eventos: 0, turnos: 0, bloqueos: 0, ignorados: 0 };
+    const turnos = [];
+    const bloqueos = [];
+    try {
+      let pageToken;
+      do {
+        const { data } = await conReintentos(() => calendar.events.list({
+          calendarId: def.id, timeMin: desde, timeMax: hasta, singleEvents: true,
+          orderBy: 'startTime', maxResults: 2500, ...(pageToken ? { pageToken } : {}),
+        }));
+        const items = data.items || [];
+        row.eventos += items.length;
+        for (const evento of items) {
+          const clasificado = clasificarEvento(evento, { tipo: def.tipo, permitirBloqueos: def.permiteBloqueos });
+          if (clasificado.turno) turnos.push(clasificado.turno);
+          if (clasificado.bloqueo) bloqueos.push(clasificado.bloqueo);
+          if (clasificado.ignorado) row.ignorados += 1;
+        }
+        pageToken = data.nextPageToken;
+      } while (pageToken);
+      row.turnos = turnos.length;
+      row.bloqueos = bloqueos.length;
+      if (cliente) await cliente.sincronizarTurnos({ calendar_id: def.id, ventana, turnos, bloqueos });
+      if (dryRun) row.muestra = [...turnos.slice(0, 3).map((t) => ({ id: `${t.event_id.slice(0, 6)}…`, tipo: t.tipo, fecha: t.inicio })), ...bloqueos.slice(0, 3).map((b) => ({ id: `${b.event_id.slice(0, 6)}…`, tipo: b.clase, fecha: b.inicio }))];
+    } catch (error) {
+      errores.push({ calendario: def.tipo, mensaje: mensajeSeguro(error) });
+    }
+    calendarios.push(row);
+  }
+  return res.status(200).json({ ok: errores.length === 0, dryRun, ventana, calendarios, duracionMs: Date.now() - inicio, errores });
 }
 
 async function sincronizarDelta({ limite = 5 } = {}) {

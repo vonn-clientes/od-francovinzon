@@ -3,6 +3,7 @@ import {
   escribirConfirmacionSolicitada, asegurarCodigoCorto, formatArgDay, formatArgTime, extraerTelefono, extraerDni,
 } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
+import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { aTituloCase } from '../../lib/pacientesSheet.js';
 import { logActividad } from '../../lib/adminConfig.js';
 import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
@@ -39,6 +40,7 @@ export default async function handler(req, res) {
 
       await calendar.events.delete({ calendarId, eventId });
       await logActividad({ tipo: 'turno_cancelado', detalle: detalleLegible, actor: 'gestión (Ayelen)' });
+      await espejarTurnosBestEffort();
       return res.status(200).json({ success: true, message: 'Turno cancelado.' });
     }
 
@@ -49,6 +51,7 @@ export default async function handler(req, res) {
     if (accion === 'asegurar-codigo-corto') {
       const { data: original } = await calendar.events.get({ calendarId, eventId });
       const codigoCorto = await asegurarCodigoCorto(calendar, calendarId, eventId, original.description || '');
+      await espejarTurnosBestEffort();
       return res.status(200).json({ success: true, codigoCorto });
     }
 
@@ -66,6 +69,7 @@ export default async function handler(req, res) {
         detalle: `${original.summary || 'paciente'} — ${formatArgDay(fechaConfirmado)} ${formatArgTime(fechaConfirmado)}hs`,
         actor: 'gestión (Ayelen)',
       });
+      await espejarTurnosBestEffort();
       return res.status(200).json({
         success: true,
         message: confirmado ? 'Turno marcado como confirmado.' : 'Turno marcado como sin confirmar.',
@@ -81,6 +85,7 @@ export default async function handler(req, res) {
       const { data: original } = await calendar.events.get({ calendarId, eventId });
       const nuevaDescripcion = escribirConfirmacionSolicitada(original.description || '');
       await calendar.events.patch({ calendarId, eventId, requestBody: { description: nuevaDescripcion } });
+      await espejarTurnosBestEffort();
       return res.status(200).json({ success: true });
     }
 
@@ -157,6 +162,8 @@ export default async function handler(req, res) {
       const apellidoSync = partesNombre.join(' ');
       await upsertPacienteConsolidado({ telefono: extraerTelefono(desc), nombre: nombreSync, apellido: apellidoSync, dni: extraerDni(desc), origen: 'turno' });
     }
+
+    await espejarTurnosBestEffort();
 
     res.status(200).json({ success: true, message: `Movido al ${nuevaFecha} a las ${nuevaHora} hs.` });
   } catch (err) {

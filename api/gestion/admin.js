@@ -16,6 +16,7 @@ import {
   PACIENTES_FOLDER_ID, FICHA_TEMPLATE_ID, SHEET_NAME, parsearNombreArchivo, rangoMovimientos, rangoPrestacionesObraSocial,
 } from '../../lib/pacientesSheet.js';
 import { avisarFallo } from '../../lib/alertas.js';
+import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { conReintentos } from '../../lib/retry.js';
 import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
@@ -176,6 +177,7 @@ async function postHorarios(req, res) {
         end: { date: nextDayStr(date) },
       },
     }));
+    await espejarTurnosBestEffort();
     await logActividad({ tipo: 'dia_bloqueado', detalle: `${date}${motivo ? ` — ${motivo}` : ''}`, actor: 'admin' });
     return res.status(200).json({ success: true });
   }
@@ -194,6 +196,7 @@ async function postHorarios(req, res) {
         end: { dateTime: end.toISOString(), timeZone: TIME_ZONE },
       },
     }));
+    await espejarTurnosBestEffort();
     await logActividad({ tipo: 'horario_bloqueado', detalle: `${date} ${horaInicio}-${horaFin}${motivo ? ` — ${motivo}` : ''}`, actor: 'admin' });
     return res.status(200).json({ success: true });
   }
@@ -201,6 +204,7 @@ async function postHorarios(req, res) {
   if (accion === 'desbloquear') {
     const { eventId } = req.body;
     await conReintentos(() => calendar.events.delete({ calendarId: CALENDAR_ID, eventId }));
+    await espejarTurnosBestEffort();
     await logActividad({ tipo: 'bloqueo_eliminado', detalle: eventId, actor: 'admin' });
     return res.status(200).json({ success: true });
   }

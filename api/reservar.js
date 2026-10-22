@@ -8,6 +8,7 @@ import {
 import { avisarFallo } from '../lib/alertas.js';
 import { conReintentos } from '../lib/retry.js';
 import { obtenerHorariosConfig, logActividad } from '../lib/adminConfig.js';
+import { espejarTurnosBestEffort } from '../lib/espejoTurnos.js';
 
 // El ticket térmico imprime un QR también para sobreturnos (ver gestion/index.html),
 // así que "obtener"/"cancelar" tienen que poder apuntar a SOBRETURNOS_CALENDAR_ID —
@@ -51,6 +52,7 @@ export default async function handler(req, res) {
     if (resultado.success) {
       await logActividad({ tipo: 'turno_creado', detalle: `${nombre} ${apellido} — ${date} ${time}`, actor: 'paciente (/turnos)' });
     }
+    if (resultado.success) await espejarTurnosBestEffort();
     res.status(200).json(resultado);
   } catch (err) {
     console.error(err);
@@ -230,6 +232,7 @@ async function confirmarPropio(req, res) {
       detalle: `${ev.summary || 'paciente'} — ${formatArgDay(fechaConfirmado)} ${formatArgTime(fechaConfirmado)}hs`,
       actor: 'paciente (/turno)',
     });
+    await espejarTurnosBestEffort();
     res.status(200).json({ success: true, message: '¡Turno confirmado! Gracias por avisarnos.' });
   } catch (err) {
     console.error(err);
@@ -255,6 +258,7 @@ async function cancelarPropio(req, res) {
 
     await conReintentos(() => calendar.events.delete({ calendarId: calId, eventId }));
     await logActividad({ tipo: 'turno_cancelado', detalle: detalleLegible, actor: 'paciente (/turno)' });
+    await espejarTurnosBestEffort();
     res.status(200).json({ success: true, message: 'Turno cancelado.' });
   } catch (err) {
     console.error(err);
@@ -330,6 +334,7 @@ async function moverPropio(req, res) {
         actor: 'paciente (/turno)',
       });
 
+      await espejarTurnosBestEffort();
       return res.status(200).json({
         success: true,
         message: `Turno reprogramado para el ${date} a las ${time} hs (hora Argentina).`,
@@ -360,6 +365,7 @@ async function moverPropio(req, res) {
       actor: 'paciente (/turno)',
     });
 
+    await espejarTurnosBestEffort();
     res.status(200).json({
       success: true,
       message: `Turno reprogramado para el ${date} a las ${time} hs (hora Argentina).`,

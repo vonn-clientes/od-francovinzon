@@ -44,6 +44,9 @@ import { recalcularAsistencia } from '../../lib/asistenciaPacientes.js';
 import { generarPdfReceta } from '../../lib/pdfExport.js';
 import { parsearReceta, camposFaltantes } from '../../lib/recetaParser.js';
 import { extraerUrlFirmaElectronica } from '../../lib/recetaFirmaQr.js';
+import { parsearImporteAR } from '../../lib/cuentaSaldo.js';
+import { crearClienteSupabase, construirPayload, sincronizarFichas, filtrarArchivosModificados, conTimeout } from '../../lib/sincronizarSupabase.js';
+import { sincronizarTurnosVentana, espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -93,7 +96,16 @@ export default async function handler(req, res) {
       const maxFichas = parseInt(req.query.maxFichas || '0', 10) || 0;
       const offset = parseInt(req.query.offset || '0', 10) || 0;
       const r = await recalcularAsistencia({ dryRun: false, maxFichas, offset });
-      return res.status(200).json(r);
+      let supabase;
+      if (process.env.SUPABASE_SYNC_ON_WRITE === '1') {
+        try {
+          const resumen = await sincronizarDelta({ limite: 40 });
+          let turnos;
+          try { turnos = await sincronizarTurnosVentana({ diasAtras: 30, diasAdelante: 120 }); } catch { turnos = { error: 'falló sincronización de turnos' }; }
+          supabase = { ...resumen, turnos };
+        } catch { supabase = { error: 'falló sincronización' }; }
+      }
+      return res.status(200).json(supabase ? { ...r, supabase } : r);
     }
 
     // UTILITARIO TEMPORAL DE DIAGNÓSTICO (2026-08-25): solo lectura — reporta el estado de
@@ -138,6 +150,8 @@ export default async function handler(req, res) {
 
 
     if (req.method === 'GET') {
+      if (req.query.modo === 'sync-supabase') return await sincronizarSupabaseModo(req, res);
+      if (req.query.modo === 'sync-turnos') return await sincronizarTurnosModo(req, res);
       if (!claveValida(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
       // Recálculo manual de asistencia (botón "Actualizar" de /gestion Pacientes) —
       // ?dryRun=1 para contar sin escribir, tandas con maxFichas/offset. El cron diario
@@ -178,25 +192,7 @@ export default async function handler(req, res) {
       return await recibirRecetaShortcut(req, res);
     }
     if (req.method === 'POST') {
-      if (!claveValida(req.body.key)) return res.status(401).json({ error: 'unauthorized' });
-      if (req.body.accion === 'crear') return await crearPaciente(req, res);
-      if (req.body.accion === 'actualizar-campo') return await actualizarCampo(req, res);
-      if (req.body.accion === 'actualizar-paciente-central') return await actualizarPacienteCentral(req, res);
-      if (req.body.accion === 'fusionar') return await fusionarPacientes(req, res);
-      if (req.body.accion === 'completar-telefono-turno') return await completarTelefonoTurno(req, res);
-      if (req.body.accion === 'confirmar-match') return await confirmarMatch(req, res);
-      if (req.body.accion === 'asignar-turno-a-ficha') {
-        const r = await asignarFilaAFicha(req.body.fila, req.body.fichaId);
-        return res.status(r.ok ? 200 : 400).json({ success: r.ok, message: r.error, nombre: r.nombre });
-      }
-      if (req.body.accion === 'movimiento-agregar') return await movimientoAgregar(req, res);
-      if (req.body.accion === 'movimiento-editar') return await movimientoEditar(req, res);
-      if (req.body.accion === 'movimiento-anular') return await movimientoAnular(req, res);
-      if (req.body.accion === 'movimiento-limpiar') return await movimientoLimpiar(req, res);
-      if (req.body.accion === 'prestacion-agregar') return await prestacionAgregar(req, res);
-      if (req.body.accion === 'prestacion-editar') return await prestacionEditar(req, res);
-      if (req.body.accion === 'prestacion-eliminar') return await prestacionEliminar(req, res);
-      return res.status(400).json({ error: 'acción inválida' });
+      return await despacharPost(req, res);
     }
 
     res.status(405).json({ error: 'method not allowed' });
@@ -208,6 +204,80 @@ export default async function handler(req, res) {
       error: err,
     });
     res.status(500).json({ error: 'Error inesperado.' });
+  }
+}
+
+async function despacharPost(req, res) {
+  if (!claveValida(req.body.key)) return res.status(401).json({ error: 'unauthorized' });
+  const { accion } = req.body;
+  const mutadoras = new Set(['crear','actualizar-campo','actualizar-paciente-central','fusionar','confirmar-match','movimiento-agregar','movimiento-editar','movimiento-anular','movimiento-limpiar','prestacion-agregar','prestacion-editar','prestacion-eliminar','completar-telefono-turno']);
+  if (process.env.SUPABASE_SYNC_ON_WRITE !== '1' || !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !mutadoras.has(accion)) {
+    return despacharPostOriginal(req, res);
+  }
+  let status = 200; let body; let capturado = false;
+  const proxy = Object.create(res);
+  proxy.status = (code) => { status = code; return proxy; };
+  proxy.json = (value) => { body = value; capturado = true; return proxy; };
+  proxy.send = (value) => { body = value; capturado = true; return proxy; };
+  try {
+    await despacharPostOriginal(req, proxy);
+    if (capturado && status < 400) {
+      const ids = new Set();
+      const b = req.body || {};
+      for (const id of [b.id, b.pacienteId, b.idFicha, b.fichaId, b.idMantener]) if (id) ids.add(id);
+      if (accion === 'fusionar' && b.idEliminar) ids.add(b.idEliminar);
+      if (accion === 'crear' && body?.id) ids.add(body.id);
+      if (accion === 'actualizar-paciente-central' && (body?.id || body?.fichaId)) ids.add(body.id || body.fichaId);
+      for (const id of ids) await espejarFichaBestEffort(id);
+      if (ids.size === 0) {
+        try { await conTimeout(sincronizarDelta({ limite: 5 }), 4000); } catch {}
+      }
+      if (['completar-telefono-turno','confirmar-match','movimiento-agregar','movimiento-editar','movimiento-anular','movimiento-limpiar','prestacion-agregar','prestacion-editar','prestacion-eliminar'].includes(accion)) await espejarTurnosBestEffort();
+    }
+  } catch { /* la respuesta del handler conserva prioridad */ }
+  if (!capturado) return res.status(500).json({ error: 'Error inesperado.' });
+  return res.status(status)[typeof body === 'string' ? 'send' : 'json'](body);
+}
+
+async function despacharPostOriginal(req, res) {
+  const a = req.body.accion;
+  if (a === 'crear') return crearPaciente(req, res);
+  if (a === 'actualizar-campo') return actualizarCampo(req, res);
+  if (a === 'actualizar-paciente-central') return actualizarPacienteCentral(req, res);
+  if (a === 'fusionar') return fusionarPacientes(req, res);
+  if (a === 'completar-telefono-turno') return completarTelefonoTurno(req, res);
+  if (a === 'confirmar-match') return confirmarMatch(req, res);
+  if (a === 'asignar-turno-a-ficha') { const r = await asignarFilaAFicha(req.body.fila, req.body.fichaId); return res.status(r.ok ? 200 : 400).json({ success: r.ok, message: r.error, nombre: r.nombre }); }
+  const handlers = { 'movimiento-agregar': movimientoAgregar, 'movimiento-editar': movimientoEditar, 'movimiento-anular': movimientoAnular, 'movimiento-limpiar': movimientoLimpiar, 'prestacion-agregar': prestacionAgregar, 'prestacion-editar': prestacionEditar, 'prestacion-eliminar': prestacionEliminar };
+  if (handlers[a]) return handlers[a](req, res);
+  return res.status(400).json({ error: 'acción inválida' });
+}
+
+let cotizacionCache = { valor: 0, vence: 0 };
+async function espejarFichaBestEffort(id) {
+  if (process.env.SUPABASE_SYNC_ON_WRITE !== '1' || !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !id) return;
+  try {
+    await conTimeout((async () => {
+      let cotizacionFallback = cotizacionCache.vence > Date.now() ? cotizacionCache.valor : 0;
+      if (cotizacionCache.vence <= Date.now()) {
+        try {
+          const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+          const lista = await historicoDolarBlue();
+          for (let i = lista.length - 1; i >= 0; i -= 1) if (lista[i].fecha <= hoy) { cotizacionFallback = Math.round(((lista[i].compra + lista[i].venta) / 2) * 100) / 100; break; }
+        } catch { cotizacionFallback = 0; }
+        cotizacionCache = { valor: cotizacionFallback, vence: Date.now() + 600000 };
+      }
+      const sheets = getPacientesSheetsClient();
+      const ficha = await leerFichaSoloLectura(sheets, id);
+      const cliente = crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY });
+      const drive = getPacientesDriveClient();
+      let driveModifiedTime = null;
+      try { driveModifiedTime = (await drive.files.get({ fileId: id, fields: 'modifiedTime' })).data.modifiedTime || null; } catch {}
+      await cliente.sincronizarFicha(construirPayload(id, ficha, { cotizacionFallback, driveModifiedTime }));
+    })(), 4000);
+  } catch (error) {
+    const mensaje = String(error?.message || 'error').replace(/\d{6,}/g, '###').slice(0, 140);
+    console.error(`[supabase-sync] ${String(id).replace(/\d{6,}/g, '###')}: ${mensaje}`);
   }
 }
 
@@ -302,6 +372,14 @@ async function listarArchivosPacientes(drive) {
   // "(no tocar)" es la convención ya establecida en todo el proyecto para marcar estas
   // hojas/carpetas de sistema (ver FOTOS_FOLDER_NAME, BACKUP_FOLDER_NAME,
   // MAPEO_TELEFONO_FICHA_NAME, PACIENTES_CONSOLIDADOS_NAME) — nunca se había aplicado acá.
+  return (data.files || []).filter((f) => f.id !== FICHA_TEMPLATE_ID && !/^⭐/.test(f.name) && !/\(no tocar\)\s*$/.test(f.name));
+}
+
+async function listarArchivosPacientesConModifiedTime(drive) {
+  const { data } = await conReintentos(() => drive.files.list({
+    q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
+    fields: 'files(id, name, modifiedTime)', pageSize: 1000,
+  }));
   return (data.files || []).filter((f) => f.id !== FICHA_TEMPLATE_ID && !/^⭐/.test(f.name) && !/\(no tocar\)\s*$/.test(f.name));
 }
 
@@ -513,6 +591,197 @@ async function obtenerFicha(req, res) {
   });
 }
 
+// Copia espejo de solo lectura de las fichas: vive acá porque necesita los clientes
+// OAuth de Sheets/Drive y evita sumar otra función serverless al límite del plan Hobby.
+async function leerFichaSoloLectura(sheets, id) {
+  const ranges = [
+    `${SHEET_NAME}!C5:C15`,
+    `${SHEET_NAME}!E6:F11`,
+    rangoMovimientos(),
+    rangoMonedaMovimientos(),
+  ];
+  let values;
+  try {
+    const { data } = await conReintentos(() => sheets.spreadsheets.values.batchGet({ spreadsheetId: id, ranges }));
+    values = data.valueRanges;
+  } catch (err) {
+    const status = Number(err?.code ?? err?.response?.status ?? err?.status);
+    const reasons = [...(err?.errors || []), ...(err?.response?.data?.error?.errors || [])]
+      .map((e) => String(e?.reason || '').toLowerCase());
+    const message = String(err?.message || '').toLowerCase();
+    const esCuota = status === 429 || status === 403 && reasons.some((r) => ['ratelimitexceeded', 'userratelimitexceeded'].includes(r))
+      || reasons.some((r) => ['ratelimitexceeded', 'userratelimitexceeded'].includes(r))
+      || ['per minute per user', 'userratelimitexceeded', 'ratelimitexceeded'].some((s) => message.includes(s));
+    if (esCuota) throw err;
+    return leerFichaSoloLecturaSeparada(sheets, id);
+  }
+  const [campos, financiero, movRaw, monedaRaw] = values.map((r) => r.values || []);
+  return mapearFichaSoloLectura(campos, financiero, movRaw, monedaRaw);
+}
+
+async function leerFichaSoloLecturaSeparada(sheets, id) {
+  const [campos, financiero, movRaw, monedaRaw] = await Promise.all([
+    conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C5:C15` })),
+    conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!E6:F11` })),
+    conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoMovimientos() })),
+    conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoMonedaMovimientos() })).catch(() => ({ data: { values: [] } })),
+  ]);
+  return mapearFichaSoloLectura(campos.data.values || [], financiero.data.values || [], movRaw.data.values || [], monedaRaw.data.values || []);
+}
+
+function mapearFichaSoloLectura(campos, financiero, movRaw, monedaFilas) {
+  const c = campos.map((r) => (r[0] != null ? String(r[0]) : ''));
+  while (c.length < 11) c.push('');
+  const [nombre, apellido, dni, fechaNacimiento, domicilio, localidad, obraSocial, nAfiliado, plan, telefono, planTratamiento] = c;
+  const f = financiero;
+  const movimientos = movRaw
+    .map((row, i) => ({
+      fila: 18 + i, fecha: row[0] || '', tratamiento: row[1] || '', debe: row[2] || '',
+      haber: row[3] || '', saldo: row[4] || '', formaPago: row[6] || '',
+      monedaDebe: (monedaFilas[i] || [])[0] || '', monedaHaber: (monedaFilas[i] || [])[1] || '',
+      aplicaA: (monedaFilas[i] || [])[2] || '', cotizacion: (monedaFilas[i] || [])[3] || '',
+    }))
+    .filter((m) => m.fecha || m.tratamiento || m.debe || m.haber)
+    .map((m) => ({ ...m, anulado: /^\[ANULADO\]/.test(m.tratamiento) }));
+  return {
+    campos: { nombre, apellido, dni, fechaNacimiento, domicilio, localidad, obraSocial, nAfiliado, plan, telefono, planTratamiento },
+    financiero: {
+      total: f[0]?.[1] || '$0,00', pagado: f[1]?.[1] || '$0,00', saldo: f[2]?.[1] || '$0,00',
+      alDiaTexto: f[3]?.[0] || '', diasSinPagoTexto: f[5]?.[1] || '',
+    },
+    movimientos,
+  };
+}
+
+// Mensaje de error apto para devolver: sin números largos (DNI/teléfonos) y acotado.
+function mensajeSeguro(e) {
+  return String(e?.message || e || 'error').replace(/\d{6,}/g, '###').slice(0, 140);
+}
+
+async function sincronizarSupabaseModo(req, res) {
+  if (!isValidAdminKey(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  const url = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !serviceKey) return res.status(500).json({ error: 'Falta configuración de Supabase.' });
+
+  if (req.query.desde === 'auto') {
+    try {
+      const limite = Math.min(40, Math.max(0, Number.parseInt(req.query.limite, 10) || 5));
+      const resumen = await sincronizarDelta({ limite });
+      return res.status(200).json({ ok: resumen.errores.length === 0, ...resumen });
+    } catch { return res.status(500).json({ error: 'No se pudo procesar la sincronización.' }); }
+  }
+  const inicio = Date.now();
+  const parseEntero = (valor, defecto) => {
+    const n = Number.parseInt(valor, 10);
+    return Number.isFinite(n) && n >= 0 ? n : defecto;
+  };
+  const limite = Math.min(40, parseEntero(req.query.limite, 5));
+  let offset = parseEntero(req.query.offset, 0);
+  const dryRun = req.query.dryRun === '1';
+  try {
+    let cotizacionFallback = 0;
+    try {
+      const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+      const lista = await historicoDolarBlue();
+      for (let i = lista.length - 1; i >= 0; i -= 1) {
+        if (lista[i].fecha <= hoy) {
+          cotizacionFallback = Math.round(((lista[i].compra + lista[i].venta) / 2) * 100) / 100;
+          break;
+        }
+      }
+    } catch { cotizacionFallback = 0; }
+
+    const desde = req.query.desde;
+    const drive = getPacientesDriveClient();
+    const todas = (req.query.desde ? await listarArchivosPacientesConModifiedTime(drive) : await listarArchivosPacientes(drive)).sort((a, b) => a.id.localeCompare(b.id));
+    const archivos = req.query.desde && desde ? filtrarArchivosModificados(todas, desde) : todas;
+    if (req.query.desde === 'auto' && !desde) offset = 0;
+    const seleccion = archivos.slice(offset, offset + limite);
+    const sheets = getPacientesSheetsClient();
+    const leerFicha = (id) => leerFichaSoloLectura(sheets, id);
+    const errores = [];
+    const resumen = [];
+    let ok_count = 0;
+    let max_modified = null;
+    if (dryRun) {
+      for (const { id } of seleccion) {
+        try {
+          const ficha = await leerFicha(id);
+          const { paciente, movimientos } = construirPayload(id, ficha, { cotizacionFallback, ...(seleccion.find((f) => f.id === id)?.modifiedTime ? { driveModifiedTime: seleccion.find((f) => f.id === id).modifiedTime } : {}) });
+          const saldoHoja = parsearImporteAR(ficha.financiero?.saldo);
+          resumen.push({ id, cant_movimientos: movimientos.length, saldo_ars: paciente.saldo_ars, saldo_usd: paciente.saldo_usd, saldo_hoja: saldoHoja, difiere: Math.abs((paciente.saldo_ars || 0) - saldoHoja) > 0.01 });
+          ok_count += 1;
+        } catch (error) {
+          errores.push({ id, mensaje: mensajeSeguro(error) });
+        }
+      }
+    } else {
+      const cliente = crearClienteSupabase({ url, serviceKey });
+      const driveModifiedTimes = new Map(seleccion.map((f) => [f.id, f.modifiedTime || null]));
+      const resultado = await sincronizarFichas({ ids: seleccion.map((f) => f.id), leerFicha, cliente, cotizacionFallback, driveModifiedTimes });
+      ok_count = resultado.ok;
+      errores.push(...resultado.errores.map(({ id, mensaje }) => ({ id, mensaje: mensajeSeguro(mensaje) })));
+    }
+    for (const archivo of seleccion) if (archivo.modifiedTime && (!max_modified || archivo.modifiedTime > max_modified)) max_modified = archivo.modifiedTime;
+    return res.status(200).json({
+      ok: errores.length === 0, dryRun, total_fichas_en_drive: todas.length, offset, limite, desde: desde || null, max_modified,
+      procesadas: seleccion.length, ok_count, errores, resumen, duracionMs: Date.now() - inicio, cotizacionFallback,
+    });
+  } catch {
+    // No registrar ni devolver datos de fichas ni credenciales ante un error global.
+    return res.status(500).json({ error: 'No se pudo procesar la sincronización.' });
+  }
+}
+
+async function sincronizarTurnosModo(req, res) {
+  if (!isValidAdminKey(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  const parseDias = (valor, defecto) => {
+    const n = Number.parseInt(valor, 10);
+    return Number.isFinite(n) && n >= 0 ? Math.min(n, 730) : defecto;
+  };
+  const resultado = await sincronizarTurnosVentana({
+    diasAtras: parseDias(req.query.dias_atras, 30),
+    diasAdelante: parseDias(req.query.dias_adelante, 120),
+    dryRun: req.query.dryRun === '1',
+  });
+  return res.status(resultado.error ? 500 : 200).json(resultado);
+}
+
+async function sincronizarDelta({ limite = 5 } = {}) {
+  const drive = getPacientesDriveClient();
+  const archivos = await listarArchivosPacientesConModifiedTime(drive);
+  const cliente = crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY });
+  const estado = await cliente.estadoSync();
+  const pendientes = archivos.filter((archivo) => {
+    if (!estado.has(archivo.id)) return true;
+    const guardado = estado.get(archivo.id);
+    if (guardado == null) return true;
+    const driveTime = Date.parse(archivo.modifiedTime || '');
+    const savedTime = Date.parse(guardado);
+    return Number.isFinite(driveTime) && (!Number.isFinite(savedTime) || driveTime > savedTime);
+  }).sort((a, b) => (Date.parse(a.modifiedTime || '') || 0) - (Date.parse(b.modifiedTime || '') || 0));
+  const seleccion = pendientes.slice(0, Math.max(0, limite));
+  let cotizacionFallback = 0;
+  try {
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+    const lista = await historicoDolarBlue();
+    for (let i = lista.length - 1; i >= 0; i -= 1) if (lista[i].fecha <= hoy) { cotizacionFallback = Math.round(((lista[i].compra + lista[i].venta) / 2) * 100) / 100; break; }
+  } catch {}
+  const sheets = getPacientesSheetsClient();
+  const errores = [];
+  let ok_count = 0;
+  for (let i = 0; i < seleccion.length; i += 1) {
+    const archivo = seleccion[i];
+    try {
+      const ficha = await leerFichaSoloLectura(sheets, archivo.id);
+      await cliente.sincronizarFicha(construirPayload(archivo.id, ficha, { cotizacionFallback, driveModifiedTime: archivo.modifiedTime || null }));
+      ok_count += 1;
+    } catch (error) { errores.push({ id: archivo.id, mensaje: mensajeSeguro(error) }); }
+  }
+  return { pendientes: pendientes.length, procesadas: seleccion.length, ok_count, errores };
+}
+
 // Fetch liviano de un solo campo (una sola celda, C14 = teléfono dentro del rango
 // C5:C15 que usa obtenerFicha) — usado por el cruce de fichas de nivel 3 en
 // pacientes/index.html (mismo teléfono + nombre parecido), que solo necesita comparar
@@ -586,6 +855,7 @@ async function completarTelefonoTurno(req, res) {
     const limpia = (ev.description || '').replace(/\s+$/, '');
     const nuevaDescripcion = limpia ? `${limpia}\nTeléfono: ${telefono}` : `Teléfono: ${telefono}`;
     await conReintentos(() => calendar.events.patch({ calendarId, eventId, requestBody: { description: nuevaDescripcion } }));
+    await espejarTurnosBestEffort();
     res.status(200).json({ success: true, telefono });
   } catch (err) {
     console.error(err);
@@ -773,6 +1043,7 @@ async function confirmarMatch(req, res) {
         await conReintentos(() => calendar.events.patch({
           calendarId, eventId, requestBody: { summary: nombreCompletoFicha },
         }));
+        await espejarTurnosBestEffort();
       }
     }
 
@@ -1968,6 +2239,7 @@ async function sincronizarTurnosFuturosPaciente(paciente, campo, valor) {
           ? desc.replace(new RegExp(`${etiqueta}:\\s*[^\\n]*`, 'i'), `${etiqueta}: ${valorFinal}`)
           : `${desc.replace(/\s+$/, '')}\n${etiqueta}: ${valorFinal}`;
         await conReintentos(() => calendar.events.patch({ calendarId, eventId: ev.id, requestBody: { description: nueva } }));
+        await espejarTurnosBestEffort();
       }));
       if (lote.length === LOTE) await new Promise((r) => setTimeout(r, 400));
     }

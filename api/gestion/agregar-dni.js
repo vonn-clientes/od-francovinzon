@@ -7,6 +7,7 @@ import { getCalendarClient, isValidGestionKey, extraerTelefono } from '../../lib
 import { avisarFallo } from '../../lib/alertas.js';
 import { formatearDniConPuntos } from '../../lib/dni.js';
 import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
+import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -55,6 +56,7 @@ export default async function handler(req, res) {
       await upsertPacienteConsolidado({ telefono: extraerTelefono(descActual), nombre, apellido, dni: crudo, origen: 'turno' });
     }
 
+    await espejarTurnosBestEffort();
     res.status(200).json({
       success: true,
       message: crudo ? 'DNI actualizado.' : 'DNI borrado.',

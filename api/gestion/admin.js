@@ -1476,7 +1476,7 @@ async function exportPerfilPacientes(req, res) {
   // ---- Visitas / asistencia ----
   let consolidados = [];
   try {
-    consolidados = (await listarPacientesConsolidados())
+    consolidados = (await listarPacientesConsolidados({ cache: true }))
       .map((c) => ({ visitas: c.visitas, turnosPasados: c.turnosPasados, turnosAsistidos: c.turnosAsistidos }));
   } catch (err) {
     errores.push(`consolidados: ${err?.message || err}`);
@@ -1566,7 +1566,7 @@ async function exportPacientesCompleto(req, res) {
 
   let consolidados = [];
   try {
-    consolidados = await listarPacientesConsolidados();
+    consolidados = await listarPacientesConsolidados({ cache: true });
   } catch (err) {
     console.warn('[admin.js] export completo: no se pudo leer la planilla consolidada:', err?.message || err);
   }

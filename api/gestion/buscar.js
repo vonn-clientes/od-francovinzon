@@ -146,7 +146,7 @@ async function buscarTelefono(req, res) {
     const nombre = (req.query.nombre || '').trim();
     if (nombre.length < 2) return res.status(200).json({ telefono: null, dni: null });
 
-    const match = await buscarPacienteConsolidadoPorNombre(nombre);
+    const match = await buscarPacienteConsolidadoPorNombre(nombre, { cache: true });
     if (!match) return res.status(200).json({ telefono: null, dni: null });
 
     // Nunca "verificado" acá (esa marca es específica de intl-tel-input en /gestion/
@@ -338,7 +338,7 @@ async function tareas(req, res) {
     // en la ficha, igual aparecía “Agregar DNI/teléfono”. DNI exacto tiene prioridad;
     // el nombre solo se usa si identifica una única ficha.
     let pacientes = [];
-    try { pacientes = await listarPacientesConsolidados(); } catch (err) {
+    try { pacientes = await listarPacientesConsolidados({ cache: true }); } catch (err) {
       console.warn('[buscar.js] no se pudo cruzar tareas con fichas:', err?.message || err);
     }
     const porDniFicha = new Map();
@@ -549,7 +549,7 @@ async function proximoBloqueo(req, res) {
 async function pacientesCentral(req, res) {
   try {
     const q = String(req.query.q || '').trim().toLowerCase();
-    let filas = await listarPacientesConsolidados();
+    let filas = await listarPacientesConsolidados({ cache: true });
     if (q) {
       const qNorm = normalizarTexto(q);
       const qDni = q.replace(/\D/g, '');
@@ -626,7 +626,7 @@ async function perfilPaciente(req, res) {
   try {
     const dni = String(req.query.dni || '').trim();
     const telefono = String(req.query.telefono || '').trim();
-    const paciente = dni ? await buscarPacienteConsolidadoPorDni(dni) : (telefono ? await buscarPacienteConsolidadoPorTelefono(telefono) : null);
+    const paciente = dni ? await buscarPacienteConsolidadoPorDni(dni, { cache: true }) : (telefono ? await buscarPacienteConsolidadoPorTelefono(telefono, { cache: true }) : null);
     if (!paciente) {
       return res.status(200).json({ encontrado: false });
     }

@@ -38,3 +38,48 @@ test('errores, timeout, JSON inválido y sin fila quedan listos para fallback', 
   assert.equal(await noRow.leerFicha('x'), null);
   await assert.rejects(conTimeout(new Promise(() => {}), 5), /timeout/);
 });
+
+test('RPC de snapshots usa los nombres y envoltorios acordados', async () => {
+  const llamadas = [];
+  const cliente = crearClienteSupabase({ url: 'https://db.example/', serviceKey: 'k', fetchImpl: async (url, init) => {
+    llamadas.push([url, JSON.parse(init.body)]);
+    return { ok: true, json: async () => ({ datos: [], drive_modified_time: '2026-10-20T12:00:00Z' }) };
+  } });
+  await cliente.leerSnapshot('consolidados');
+  await cliente.guardarSnapshot({ clave: 'consolidados', datos: [], drive_modified_time: '2026-10-20T12:00:00Z' });
+  assert.deepEqual(llamadas, [
+    ['https://db.example/rest/v1/rpc/consultorio_leer_snapshot', { p_clave: 'consolidados' }],
+    ['https://db.example/rest/v1/rpc/consultorio_guardar_snapshot', { p: { clave: 'consolidados', datos: [], drive_modified_time: '2026-10-20T12:00:00Z' } }],
+  ]);
+});
+
+test('leerFilas usa snapshot fresco y guarda lectura vieja; errores y flag apagado caen a Sheets', async () => {
+  const { leerFilasConsolidados: leerFilas } = await import('../lib/leerFilasConsolidados.js');
+  const filasGoogle = [['111', 'Ana'], ['', ''], ['222', 'Luis']];
+  let lecturas = 0;
+  const sheets = { spreadsheets: { values: { get: async () => { lecturas += 1; return { data: { values: filasGoogle } }; } } } };
+  const drive = { files: { get: async () => ({ data: { modifiedTime: '2026-10-20T12:00:00Z' } }) } };
+  const snapshotFilas = [{ fila: 2, telefono: '111', nombre: 'Ana' }];
+  let guardados = 0;
+  const cliente = {
+    leerSnapshot: async () => ({ datos: snapshotFilas, drive_modified_time: '2026-10-20T12:00:00.000Z' }),
+    guardarSnapshot: async () => { guardados += 1; },
+  };
+  assert.deepEqual(await leerFilas(sheets, 's', { env: { SUPABASE_READS: '1', SUPABASE_URL: 'u', SUPABASE_SERVICE_KEY: 'k' }, drive, cliente }), snapshotFilas);
+  assert.equal(lecturas, 0);
+
+  cliente.leerSnapshot = async () => ({ datos: [], drive_modified_time: '2026-10-20T11:00:00Z' });
+  const filas = await leerFilas(sheets, 's', { env: { SUPABASE_READS: '1', SUPABASE_URL: 'u', SUPABASE_SERVICE_KEY: 'k' }, drive, cliente });
+  assert.equal(lecturas, 1);
+  assert.equal(filas[1].fila, 4);
+  assert.equal(guardados, 1);
+
+  await leerFilas(sheets, 's', { env: { SUPABASE_READS: '0' }, drive, cliente });
+  assert.equal(lecturas, 2);
+  cliente.leerSnapshot = async () => { throw new Error('offline'); };
+  await leerFilas(sheets, 's', { env: { SUPABASE_READS: '1', SUPABASE_URL: 'u', SUPABASE_SERVICE_KEY: 'k' }, drive, cliente });
+  assert.equal(lecturas, 3);
+  cliente.leerSnapshot = async () => null;
+  cliente.guardarSnapshot = async () => { throw new Error('write failed'); };
+  await assert.doesNotReject(leerFilas(sheets, 's', { env: { SUPABASE_READS: '1', SUPABASE_URL: 'u', SUPABASE_SERVICE_KEY: 'k' }, drive, cliente }));
+});

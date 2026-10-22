@@ -47,6 +47,7 @@ import { extraerUrlFirmaElectronica } from '../../lib/recetaFirmaQr.js';
 import { parsearImporteAR } from '../../lib/cuentaSaldo.js';
 import { crearClienteSupabase, construirPayload, sincronizarFichas, filtrarArchivosModificados, conTimeout } from '../../lib/sincronizarSupabase.js';
 import { sincronizarTurnosVentana, espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
+import { ACCIONES_SOMBRA, leerAntesSombra, registrarSombra } from '../../lib/sombraEscrituras.js';
 import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
 import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
 
@@ -222,6 +223,8 @@ async function despacharPost(req, res) {
   proxy.status = (code) => { status = code; return proxy; };
   proxy.json = (value) => { body = value; capturado = true; return proxy; };
   proxy.send = (value) => { body = value; capturado = true; return proxy; };
+  const clienteSombra = ACCIONES_SOMBRA.has(accion) && req.body.id ? crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY }) : null;
+  const antesSombra = clienteSombra ? await leerAntesSombra(clienteSombra, req.body.id) : null;
   try {
     await despacharPostOriginal(req, proxy);
     if (capturado && status < 400) {
@@ -232,6 +235,7 @@ async function despacharPost(req, res) {
       if (accion === 'crear' && body?.id) ids.add(body.id);
       if (accion === 'actualizar-paciente-central' && (body?.id || body?.fichaId)) ids.add(body.id || body.fichaId);
       for (const id of ids) await espejarFichaBestEffort(id);
+      if (clienteSombra && antesSombra) await registrarSombra(clienteSombra, { id: req.body.id, accion, body: req.body, antes: antesSombra });
       if (ids.size === 0) {
         try { await conTimeout(sincronizarDelta({ limite: 5 }), 4000); } catch {}
       }

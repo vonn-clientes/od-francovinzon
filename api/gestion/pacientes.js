@@ -751,7 +751,8 @@ async function verificarLecturasModo(req, res) {
       const fichaJson = guardada?.ficha;
       if (fichaJson == null) { sin_ficha_json.push(id); continue; }
       const normalizar = (f) => { const { driveModifiedTime, ...resto } = f || {}; return resto; };
-      const a = normalizar(google), b = normalizar(fichaJson);
+      const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+      const a = canon(normalizar(google)), b = canon(normalizar(fichaJson));
       comparadas += 1;
       if (JSON.stringify(a) === JSON.stringify(b)) iguales += 1;
       else {

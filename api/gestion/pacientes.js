@@ -155,6 +155,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       if (req.query.modo === 'sync-supabase') return await sincronizarSupabaseModo(req, res);
       if (req.query.modo === 'verificar-lecturas') return await verificarLecturasModo(req, res);
+      if (req.query.modo === 'sync-config') return await sincronizarConfigModo(req, res);
       if (req.query.modo === 'sync-turnos') return await sincronizarTurnosModo(req, res);
       if (!claveValida(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
       // Recálculo manual de asistencia (botón "Actualizar" de /gestion Pacientes) —
@@ -716,6 +717,19 @@ async function sincronizarSupabaseModo(req, res) {
   } catch {
     // No registrar ni devolver datos de fichas ni credenciales ante un error global.
     return res.status(500).json({ error: 'No se pudo procesar la sincronización.' });
+  }
+}
+
+async function sincronizarConfigModo(req, res) {
+  if (!isValidAdminKey(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const { leerTodoParaEspejo } = await import('../../lib/adminConfig.js');
+    const { espejarLote } = await import('../../lib/espejoConfig.js');
+    const todo = await leerTodoParaEspejo();
+    if (req.query.dryRun === '1') return res.status(200).json({ dryRun: true, configs: todo.configs.length, actividad: todo.actividad.length, alertas: todo.alertas.length });
+    return res.status(200).json(await espejarLote(todo));
+  } catch (error) {
+    return res.status(500).json({ error: String(error?.message || 'error').slice(0, 140) });
   }
 }
 

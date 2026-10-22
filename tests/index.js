@@ -4,3 +4,4 @@ import './cuentaSaldo.test.js';
 import './fichaAFilas.test.js';
 import './sincronizarSupabase.test.js';
 import './sincronizarTurnos.test.js';
+import './espejoTurnosBestEffort.test.js';

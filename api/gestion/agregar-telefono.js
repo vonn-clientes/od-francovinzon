@@ -1,6 +1,7 @@
 import { getCalendarClient, isValidGestionKey, telefonoParaWhatsApp, extraerDni } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
 import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
+import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -74,6 +75,7 @@ export default async function handler(req, res) {
       await upsertPacienteConsolidado({ telefono: valorGuardar, nombre, apellido, dni: extraerDni(descActual), origen: 'turno' });
     }
 
+    await espejarTurnosBestEffort();
     res.status(200).json({
       success: true,
       message: crudo ? 'Teléfono actualizado.' : 'Teléfono borrado.',

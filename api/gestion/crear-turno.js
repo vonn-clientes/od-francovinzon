@@ -13,6 +13,7 @@ import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 // movimiento en la ficha con la fecha del turno (turno creado DESPUÉS del movimiento),
 // el turno nuevo queda confirmado. Best-effort, nunca bloquea el alta.
 import { confirmarTurnoPuntualSiMovimiento } from '../../lib/confirmarTurnosPorMovimiento.js';
+import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -129,6 +130,7 @@ export default async function handler(req, res) {
         fechaISO: date,
       }).catch(() => {});
     }
+    await espejarTurnosBestEffort();
     res.status(200).json({
       success: true,
       message: `${sobreturno ? 'Sobreturno' : 'Turno'} cargado para el ${date} a las ${time} hs.`,

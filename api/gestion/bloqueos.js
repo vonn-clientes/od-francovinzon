@@ -2,6 +2,7 @@ import {
   getCalendarClient, CALENDAR_ID, BLOCK_MARKER, FERIADO_ATENDIDO_MARKER, TIME_ZONE, pad2, toArgDate, isValidGestionKey,
 } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
+import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 
 function nextDayStr(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -51,6 +52,8 @@ export default async function handler(req, res) {
         bloqueos.map((ev) => calendar.events.delete({ calendarId: CALENDAR_ID, eventId: ev.id }))
       );
 
+      await espejarTurnosBestEffort();
+
       return res.status(200).json({ success: true, message: `Día ${date} desbloqueado.` });
     }
 
@@ -72,6 +75,7 @@ export default async function handler(req, res) {
         (ev) => !ev.start.dateTime && (ev.description || '').includes(FERIADO_ATENDIDO_MARKER)
       );
       if (yaMarcado) {
+        await espejarTurnosBestEffort();
         return res.status(200).json({ success: true, message: `Feriado del ${date} marcado como atendido.` });
       }
       await calendar.events.insert({
@@ -83,6 +87,7 @@ export default async function handler(req, res) {
           end: { date: nextDayStr(date) },
         },
       });
+      await espejarTurnosBestEffort();
       return res.status(200).json({ success: true, message: `Feriado del ${date} marcado como atendido.` });
     }
 
@@ -105,6 +110,7 @@ export default async function handler(req, res) {
       await Promise.all(
         marcadores.map((ev) => calendar.events.delete({ calendarId: CALENDAR_ID, eventId: ev.id }))
       );
+      await espejarTurnosBestEffort();
       return res.status(200).json({ success: true, message: `Feriado del ${date} desmarcado.` });
     }
 
@@ -117,6 +123,8 @@ export default async function handler(req, res) {
         end: { date: nextDayStr(date) },
       },
     });
+
+    await espejarTurnosBestEffort();
 
     res.status(200).json({ success: true, message: `Día ${date} bloqueado.` });
   } catch (err) {
@@ -148,6 +156,7 @@ async function bloquearHorario(calendar, req, res) {
     },
   });
 
+  await espejarTurnosBestEffort();
   res.status(200).json({
     success: true,
     message: `Bloqueado de ${horaInicio} a ${horaFin} el ${date}.`,

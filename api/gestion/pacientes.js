@@ -44,6 +44,7 @@ import { recalcularAsistencia } from '../../lib/asistenciaPacientes.js';
 import { generarPdfReceta } from '../../lib/pdfExport.js';
 import { parsearReceta, camposFaltantes } from '../../lib/recetaParser.js';
 import { extraerUrlFirmaElectronica } from '../../lib/recetaFirmaQr.js';
+import { parsearImporteAR } from '../../lib/cuentaSaldo.js';
 import { crearClienteSupabase, construirPayload, sincronizarFichas, filtrarArchivosModificados, conTimeout } from '../../lib/sincronizarSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
@@ -674,7 +675,8 @@ async function sincronizarSupabaseModo(req, res) {
         try {
           const ficha = await leerFicha(id);
           const { paciente, movimientos } = construirPayload(id, ficha, { cotizacionFallback, ...(seleccion.find((f) => f.id === id)?.modifiedTime ? { driveModifiedTime: seleccion.find((f) => f.id === id).modifiedTime } : {}) });
-          resumen.push({ id, cant_movimientos: movimientos.length, saldo_ars: paciente.saldo_ars, saldo_usd: paciente.saldo_usd });
+          const saldoHoja = parsearImporteAR(ficha.financiero?.saldo);
+          resumen.push({ id, cant_movimientos: movimientos.length, saldo_ars: paciente.saldo_ars, saldo_usd: paciente.saldo_usd, saldo_hoja: saldoHoja, difiere: Math.abs((paciente.saldo_ars || 0) - saldoHoja) > 0.01 });
           ok_count += 1;
         } catch (error) {
           errores.push({ id, mensaje: mensajeSeguro(error) });

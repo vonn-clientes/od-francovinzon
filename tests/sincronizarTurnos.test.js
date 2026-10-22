@@ -60,7 +60,7 @@ test('sobreturno conserva tipo y no convierte marcadores en bloqueos', () => {
   assert.equal(clasificarEvento(base({ description: 'BLOQUEO_AUTOMATICO_TURNOS' }), { tipo: 'sobreturno', permitirBloqueos: false }).turno.tipo, 'sobreturno');
 });
 
-test('cliente Supabase sincroniza turnos mediante RPC sin envolver el payload', async () => {
+test('cliente Supabase sincroniza turnos mediante RPC envolviendo el payload en p', async () => {
   let request;
   const payload = { calendar_id: 'cal', ventana: { desde: 'a', hasta: 'b' }, turnos: [], bloqueos: [] };
   const cliente = crearClienteSupabase({ url: 'https://db.example', serviceKey: 'secreto', fetchImpl: async (...args) => {
@@ -69,5 +69,5 @@ test('cliente Supabase sincroniza turnos mediante RPC sin envolver el payload', 
   } });
   await cliente.sincronizarTurnos(payload);
   assert.equal(request[0], 'https://db.example/rest/v1/rpc/consultorio_sync_turnos');
-  assert.deepEqual(JSON.parse(request[1].body), payload);
+  assert.deepEqual(JSON.parse(request[1].body), { p: payload });
 });

@@ -47,6 +47,8 @@ import { extraerUrlFirmaElectronica } from '../../lib/recetaFirmaQr.js';
 import { parsearImporteAR } from '../../lib/cuentaSaldo.js';
 import { crearClienteSupabase, construirPayload, sincronizarFichas, filtrarArchivosModificados, conTimeout } from '../../lib/sincronizarSupabase.js';
 import { sincronizarTurnosVentana, espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
+import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
+import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -151,6 +153,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       if (req.query.modo === 'sync-supabase') return await sincronizarSupabaseModo(req, res);
+      if (req.query.modo === 'verificar-lecturas') return await verificarLecturasModo(req, res);
       if (req.query.modo === 'sync-turnos') return await sincronizarTurnosModo(req, res);
       if (!claveValida(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
       // Recálculo manual de asistencia (botón "Actualizar" de /gestion Pacientes) —
@@ -270,10 +273,7 @@ async function espejarFichaBestEffort(id) {
       const sheets = getPacientesSheetsClient();
       const ficha = await leerFichaSoloLectura(sheets, id);
       const cliente = crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY });
-      const drive = getPacientesDriveClient();
-      let driveModifiedTime = null;
-      try { driveModifiedTime = (await drive.files.get({ fileId: id, fields: 'modifiedTime' })).data.modifiedTime || null; } catch {}
-      await cliente.sincronizarFicha(construirPayload(id, ficha, { cotizacionFallback, driveModifiedTime }));
+      await cliente.sincronizarFicha(construirPayload(id, ficha, { cotizacionFallback, driveModifiedTime: ficha.driveModifiedTime }));
     })(), 4000);
   } catch (error) {
     const mensaje = String(error?.message || 'error').replace(/\d{6,}/g, '###').slice(0, 140);
@@ -528,6 +528,27 @@ async function obtenerFicha(req, res) {
   const sheets = getPacientesSheetsClient();
   const drive = getPacientesDriveClient();
 
+  if (debeIntentarLecturaSupabase(process.env.SUPABASE_READS, process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)) {
+    try {
+      const respuesta = await conTimeout((async () => {
+        const { data: driveMeta } = await conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime' }));
+        const cliente = crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY });
+        return { driveMeta, fila: await cliente.leerFicha(id) };
+      })(), 3000);
+      const guardadaTime = Date.parse(respuesta.fila?.drive_modified_time || '');
+      const actualTime = Date.parse(respuesta.driveMeta?.modifiedTime || '');
+      const guardada = fichaSupabaseFresca(respuesta.fila, respuesta.driveMeta?.modifiedTime);
+      if (guardada) {
+        res.setHeader('X-Fuente', 'supabase');
+        return res.status(200).json({ ...guardada, driveModifiedTime: respuesta.driveMeta.modifiedTime });
+      }
+      if (Number.isFinite(guardadaTime) && Number.isFinite(actualTime) && actualTime > guardadaTime) {
+        void espejarFichaBestEffort(id).catch(() => {});
+      }
+    } catch { /* falla cerrada a Google, igual que antes */ }
+  }
+  res.setHeader('X-Fuente', 'google');
+
   await intentarRecuperarRespaldos(sheets, drive, id);
 
   const [campos, financiero, movRaw, presRaw, meta, monedaRaw] = await Promise.all([
@@ -541,64 +562,21 @@ async function obtenerFicha(req, res) {
     // Cuenta en dólares (columnas N:Q). Si falla, la ficha abre igual como siempre.
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: rangoMonedaMovimientos() })).catch(() => ({ data: { values: [] } })),
   ]);
-  const monedaFilas = monedaRaw.data.values || [];
-
-  const c = (campos.data.values || []).map((r) => (r[0] != null ? String(r[0]) : ''));
-  while (c.length < 11) c.push('');
-  const [nombre, apellido, dni, fechaNacimiento, domicilio, localidad, obraSocial, nAfiliado, plan, telefono, planTratamiento] = c;
-
-  const f = financiero.data.values || [];
-  const total = f[0]?.[1] || '$0,00';
-  const pagado = f[1]?.[1] || '$0,00';
-  const saldo = f[2]?.[1] || '$0,00';
-  const alDiaTexto = f[3]?.[0] || '';
-  const diasSinPagoTexto = f[5]?.[1] || '';
-
-  const movimientos = (movRaw.data.values || [])
-    .map((row, i) => ({
-      fila: 18 + i,
-      fecha: row[0] || '',
-      tratamiento: row[1] || '',
-      debe: row[2] || '',
-      haber: row[3] || '',
-      saldo: row[4] || '',
-      formaPago: row[6] || '',
-      monedaDebe: (monedaFilas[i] || [])[0] || '',
-      monedaHaber: (monedaFilas[i] || [])[1] || '',
-      aplicaA: (monedaFilas[i] || [])[2] || '',
-      cotizacion: (monedaFilas[i] || [])[3] || '',
-    }))
-    .filter((m) => m.fecha || m.tratamiento || m.debe || m.haber)
-    .map((m) => ({ ...m, anulado: /^\[ANULADO\]/.test(m.tratamiento) }));
-
-  const prestacionesObraSocial = (presRaw.data.values || [])
-    .map((row, i) => ({
-      fila: 18 + i,
-      fecha: row[0] || '',
-      tratamiento: celdaTextoLimpia(row[1]),
-      codigo: celdaTextoLimpia(row[2]),
-      autorizado: row[3] === true || row[3] === 'TRUE',
-    }))
-    .filter((p) => p.fecha || p.tratamiento || p.codigo);
-
-  res.status(200).json({
-    id,
-    driveModifiedTime: meta.data.modifiedTime,
-    campos: { nombre, apellido, dni, fechaNacimiento, domicilio, localidad, obraSocial, nAfiliado, plan, telefono, planTratamiento },
-    financiero: { total, pagado, saldo, alDiaTexto, diasSinPagoTexto },
-    movimientos,
-    prestacionesObraSocial,
-  });
+  const ficha = construirRespuestaFicha({ id, driveModifiedTime: meta.data.modifiedTime, campos: campos.data.values || [], financiero: financiero.data.values || [], movRaw: movRaw.data.values || [], presRaw: presRaw.data.values || [], monedaFilas: monedaRaw.data.values || [] });
+  res.status(200).json(ficha);
 }
 
 // Copia espejo de solo lectura de las fichas: vive acá porque necesita los clientes
 // OAuth de Sheets/Drive y evita sumar otra función serverless al límite del plan Hobby.
 async function leerFichaSoloLectura(sheets, id) {
+  const drive = getPacientesDriveClient();
+  const { data: meta } = await conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime' }));
   const ranges = [
     `${SHEET_NAME}!C5:C15`,
     `${SHEET_NAME}!E6:F11`,
     rangoMovimientos(),
     rangoMonedaMovimientos(),
+    rangoPrestacionesObraSocial(),
   ];
   let values;
   try {
@@ -613,10 +591,12 @@ async function leerFichaSoloLectura(sheets, id) {
       || reasons.some((r) => ['ratelimitexceeded', 'userratelimitexceeded'].includes(r))
       || ['per minute per user', 'userratelimitexceeded', 'ratelimitexceeded'].some((s) => message.includes(s));
     if (esCuota) throw err;
-    return leerFichaSoloLecturaSeparada(sheets, id);
+    throw err;
   }
-  const [campos, financiero, movRaw, monedaRaw] = values.map((r) => r.values || []);
-  return mapearFichaSoloLectura(campos, financiero, movRaw, monedaRaw);
+  const [campos, financiero, movRaw, monedaRaw, presRaw] = values.map((r) => r.values || []);
+  const base = mapearFichaSoloLectura(campos, financiero, movRaw, monedaRaw);
+  const fichaJson = construirRespuestaFicha({ id, driveModifiedTime: meta.modifiedTime, campos, financiero, movRaw, presRaw, monedaFilas: monedaRaw });
+  return { ...base, fichaJson, driveModifiedTime: meta.modifiedTime || null };
 }
 
 async function leerFichaSoloLecturaSeparada(sheets, id) {
@@ -664,7 +644,8 @@ async function sincronizarSupabaseModo(req, res) {
   const serviceKey = process.env.SUPABASE_SERVICE_KEY;
   if (!url || !serviceKey) return res.status(500).json({ error: 'Falta configuración de Supabase.' });
 
-  if (req.query.desde === 'auto') {
+  const forzar = req.query.forzar === '1';
+  if (req.query.desde === 'auto' && !forzar) {
     try {
       const limite = Math.min(40, Math.max(0, Number.parseInt(req.query.limite, 10) || 5));
       const resumen = await sincronizarDelta({ limite });
@@ -694,9 +675,9 @@ async function sincronizarSupabaseModo(req, res) {
 
     const desde = req.query.desde;
     const drive = getPacientesDriveClient();
-    const todas = (req.query.desde ? await listarArchivosPacientesConModifiedTime(drive) : await listarArchivosPacientes(drive)).sort((a, b) => a.id.localeCompare(b.id));
-    const archivos = req.query.desde && desde ? filtrarArchivosModificados(todas, desde) : todas;
-    if (req.query.desde === 'auto' && !desde) offset = 0;
+    const todas = (req.query.desde || forzar ? await listarArchivosPacientesConModifiedTime(drive) : await listarArchivosPacientes(drive)).sort((a, b) => a.id.localeCompare(b.id));
+    const archivos = !forzar && req.query.desde && desde ? filtrarArchivosModificados(todas, desde) : todas;
+    if (req.query.desde === 'auto' && !desde && !forzar) offset = 0;
     const seleccion = archivos.slice(offset, offset + limite);
     const sheets = getPacientesSheetsClient();
     const leerFicha = (id) => leerFichaSoloLectura(sheets, id);
@@ -708,7 +689,7 @@ async function sincronizarSupabaseModo(req, res) {
       for (const { id } of seleccion) {
         try {
           const ficha = await leerFicha(id);
-          const { paciente, movimientos } = construirPayload(id, ficha, { cotizacionFallback, ...(seleccion.find((f) => f.id === id)?.modifiedTime ? { driveModifiedTime: seleccion.find((f) => f.id === id).modifiedTime } : {}) });
+          const { paciente, movimientos } = construirPayload(id, ficha, { cotizacionFallback, driveModifiedTime: ficha.driveModifiedTime ?? seleccion.find((f) => f.id === id)?.modifiedTime ?? null });
           const saldoHoja = parsearImporteAR(ficha.financiero?.saldo);
           resumen.push({ id, cant_movimientos: movimientos.length, saldo_ars: paciente.saldo_ars, saldo_usd: paciente.saldo_usd, saldo_hoja: saldoHoja, difiere: Math.abs((paciente.saldo_ars || 0) - saldoHoja) > 0.01 });
           ok_count += 1;
@@ -748,6 +729,41 @@ async function sincronizarTurnosModo(req, res) {
   return res.status(resultado.error ? 500 : 200).json(resultado);
 }
 
+async function verificarLecturasModo(req, res) {
+  if (!isValidAdminKey(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  const url = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !serviceKey) return res.status(500).json({ error: 'Falta configuración de Supabase.' });
+  const parse = (v, d) => { const n = Number.parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : d; };
+  const limite = Math.min(40, parse(req.query.limite, 10));
+  const offset = parse(req.query.offset, 0);
+  const drive = getPacientesDriveClient();
+  const archivos = (await listarArchivosPacientes(drive)).sort((a, b) => a.id.localeCompare(b.id));
+  const seleccion = archivos.slice(offset, offset + limite);
+  const sheets = getPacientesSheetsClient();
+  const cliente = crearClienteSupabase({ url, serviceKey });
+  const distintas = [], sin_ficha_json = [], errores = [];
+  let comparadas = 0, iguales = 0;
+  for (const { id } of seleccion) {
+    try {
+      const google = (await leerFichaSoloLectura(sheets, id)).fichaJson;
+      const guardada = await cliente.leerFicha(id);
+      const fichaJson = guardada?.ficha;
+      if (fichaJson == null) { sin_ficha_json.push(id); continue; }
+      const normalizar = (f) => { const { driveModifiedTime, ...resto } = f || {}; return resto; };
+      const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+      const a = canon(normalizar(google)), b = canon(normalizar(fichaJson));
+      comparadas += 1;
+      if (JSON.stringify(a) === JSON.stringify(b)) iguales += 1;
+      else {
+        const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])];
+        distintas.push({ id, campos_distintos: keys.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])) });
+      }
+    } catch { errores.push({ id, error: 'No se pudo comparar la ficha.' }); }
+  }
+  return res.status(200).json({ ok: errores.length === 0 && distintas.length === 0 && sin_ficha_json.length === 0, total: archivos.length, comparadas, iguales, distintas, sin_ficha_json, errores });
+}
+
 async function sincronizarDelta({ limite = 5 } = {}) {
   const drive = getPacientesDriveClient();
   const archivos = await listarArchivosPacientesConModifiedTime(drive);
@@ -775,7 +791,7 @@ async function sincronizarDelta({ limite = 5 } = {}) {
     const archivo = seleccion[i];
     try {
       const ficha = await leerFichaSoloLectura(sheets, archivo.id);
-      await cliente.sincronizarFicha(construirPayload(archivo.id, ficha, { cotizacionFallback, driveModifiedTime: archivo.modifiedTime || null }));
+      await cliente.sincronizarFicha(construirPayload(archivo.id, ficha, { cotizacionFallback, driveModifiedTime: ficha.driveModifiedTime || archivo.modifiedTime || null }));
       ok_count += 1;
     } catch (error) { errores.push({ id: archivo.id, mensaje: mensajeSeguro(error) }); }
   }

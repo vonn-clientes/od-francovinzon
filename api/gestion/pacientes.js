@@ -47,6 +47,7 @@ import { extraerUrlFirmaElectronica } from '../../lib/recetaFirmaQr.js';
 import { parsearImporteAR } from '../../lib/cuentaSaldo.js';
 import { crearClienteSupabase, construirPayload, sincronizarFichas, filtrarArchivosModificados, conTimeout } from '../../lib/sincronizarSupabase.js';
 import { sincronizarTurnosVentana, espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
+import { copiarArchivosLote, listarArchivosDrive } from '../../lib/espejoArchivos.js';
 import { ACCIONES_SOMBRA, leerAntesSombra, registrarSombra } from '../../lib/sombraEscrituras.js';
 import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
 import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
@@ -155,6 +156,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       if (req.query.modo === 'sync-supabase') return await sincronizarSupabaseModo(req, res);
       if (req.query.modo === 'verificar-lecturas') return await verificarLecturasModo(req, res);
+      if (req.query.modo === 'sync-archivos') return await sincronizarArchivosModo(req, res);
       if (req.query.modo === 'sync-config') return await sincronizarConfigModo(req, res);
       if (req.query.modo === 'sync-turnos') return await sincronizarTurnosModo(req, res);
       if (!claveValida(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
@@ -717,6 +719,29 @@ async function sincronizarSupabaseModo(req, res) {
   } catch {
     // No registrar ni devolver datos de fichas ni credenciales ante un error global.
     return res.status(500).json({ error: 'No se pudo procesar la sincronización.' });
+  }
+}
+
+async function sincronizarArchivosModo(req, res) {
+  if (!isValidAdminKey(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const drive = getPacientesDriveClient();
+    const tipo = req.query.tipo === 'foto' || req.query.tipo === 'receta' ? req.query.tipo : null;
+    const limite = Math.min(100, Math.max(1, parseInt(req.query.limite || '15', 10) || 15));
+    const carpetas = [];
+    if (!tipo || tipo === 'foto') carpetas.push({ id: await getOrCreateFotosFolderId(drive), tipo: 'foto' });
+    if (!tipo || tipo === 'receta') carpetas.push({ id: await getOrCreateRecetasFolderId(drive), tipo: 'receta' });
+    const ficheros = [];
+    for (const carpeta of carpetas) {
+      const archivos = await listarArchivosDrive(drive, carpeta.id);
+      ficheros.push(...archivos.map((f) => ({ ...f, tipo: carpeta.tipo })));
+    }
+    if (req.query.dryRun === '1') {
+      return res.status(200).json({ dryRun: true, archivos: ficheros.length, bytes: ficheros.reduce((n, f) => n + (Number(f.size) || 0), 0), fotos: ficheros.filter((f) => f.tipo === 'foto').length, recetas: ficheros.filter((f) => f.tipo === 'receta').length });
+    }
+    return res.status(200).json(await copiarArchivosLote({ drive, ficheros, supabaseUrl: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY, limite }));
+  } catch (error) {
+    return res.status(500).json({ error: String(error?.message || 'error').slice(0, 140) });
   }
 }
 

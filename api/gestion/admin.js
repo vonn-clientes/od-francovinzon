@@ -1048,6 +1048,7 @@ async function calcularFinanzasPacientes(forzar) {
 
   const ingresosPorDia = {};
   const pagos = []; // { fechaISO, monto }
+  const cobrosMes = {};
   const escaneo = await escanearFichasAdmin(forzar);
   escaneo.fichas.forEach((f) => f.movimientos
     .filter((m) => m.fecha && m.haber && !/^\[ANULADO\]/.test(m.tratamiento))
@@ -1058,6 +1059,19 @@ async function calcularFinanzasPacientes(forzar) {
       if (monto <= 0) return;
       ingresosPorDia[fechaISO] = (ingresosPorDia[fechaISO] || 0) + monto;
       pagos.push({ fechaISO, monto });
+      // Cobros por forma de pago (efectivo / transferencias por titular / otras / sin dato)
+      const fp = String(m.formaPago || '').trim();
+      const mesK = fechaISO.slice(0, 7);
+      const fila = (cobrosMes[mesK] ||= { mes: mesK, efectivo: 0, transferencia: 0, otras: 0, sinDato: 0, total: 0, cuentas: {} });
+      fila.total += monto;
+      if (!fp) fila.sinDato += monto;
+      else if (/^(ef|efvo|efectivo)\.?$/i.test(fp)) fila.efectivo += monto;
+      else if (/^transf/i.test(fp)) {
+        fila.transferencia += monto;
+        const t = fp.match(/\(([^)]+)\)/);
+        const cuenta = t ? t[1].trim() : 'Sin especificar';
+        fila.cuentas[cuenta] = (fila.cuentas[cuenta] || 0) + monto;
+      } else fila.otras += monto;
     }));
 
   // (e) Ticket promedio en $ y USD, agrupado por mes y por año — cada pago se convierte
@@ -1104,8 +1118,16 @@ async function calcularFinanzasPacientes(forzar) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([fecha, monto]) => ({ fecha, monto: Math.round(monto * 100) / 100 }));
 
+  const redondear = (n) => Math.round(n * 100) / 100;
+  const cobrosPorFormaPago = Object.values(cobrosMes).sort((a, b) => a.mes.localeCompare(b.mes)).map((f) => ({
+    mes: f.mes, efectivo: redondear(f.efectivo), transferencia: redondear(f.transferencia), otras: redondear(f.otras),
+    sinDato: redondear(f.sinDato), total: redondear(f.total),
+    cuentas: Object.fromEntries(Object.entries(f.cuentas).map(([k, v]) => [k, redondear(v)])),
+  }));
+
   const valor = {
     ingresosDiarios,
+    cobrosPorFormaPago,
     ticketPorMes,
     ticketPorAnio,
     dolarError,
@@ -1387,6 +1409,7 @@ async function getMetricasAvanzadas(req, res) {
     ingresosDiarios: finanzas.ingresosDiarios,
     ticketPorMes: finanzas.ticketPorMes,
     ticketPorAnio: finanzas.ticketPorAnio,
+    cobrosPorFormaPago: finanzas.cobrosPorFormaPago || [],
     dolarError: finanzas.dolarError || null,
     pacientesTotales,
     deuda,

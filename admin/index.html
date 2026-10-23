@@ -243,6 +243,13 @@
         </div>
 
         <div class="card">
+          <h2>Cobros por forma de pago</h2>
+          <p class="hint">Cuánto se cobró cada mes en efectivo y por transferencia (y a qué cuenta). Los cobros sin forma de pago cargada aparecen como "Sin dato".</p>
+          <div class="table-wrap"><table id="dash-cobros-forma"><thead><tr><th>Mes</th><th>Efectivo</th><th>Transferencia</th><th>Otras</th><th>Sin dato</th><th>Total</th></tr></thead><tbody></tbody></table></div>
+          <h3 style="font-size:14px;margin:16px 0 6px;">Transferencias por cuenta (mes actual)</h3>
+          <div id="dash-cobros-cuentas" class="hint"></div>
+        </div>
+        <div class="card">
           <h2>Ticket promedio</h2>
           <p class="hint">Cada pago convertido a USD con la cotización blue real del día que se cobró (ArgentinaDatos).</p>
           <h3 style="font-size:14px;margin-bottom:6px;">Por mes (últimos 12)</h3>
@@ -931,6 +938,16 @@
       document.querySelector('#dash-ingresos-anual tbody').innerHTML = Object.entries(porAnioIngresos).sort(([a], [b]) => b.localeCompare(a)).map(([anio, monto]) =>
         `<tr><td>${anio}</td><td>${fmtArs(monto)}</td></tr>`
       ).join('') || '<tr><td colspan="2">Sin datos.</td></tr>';
+
+      // Cobros por forma de pago
+      const cobros = (m.cobrosPorFormaPago || []).slice(-12).reverse();
+      document.querySelector('#dash-cobros-forma tbody').innerHTML = cobros.map((c) =>
+        `<tr><td>${fmtMesCorto(c.mes)}</td><td>${fmtArs(c.efectivo)}</td><td>${fmtArs(c.transferencia)}</td><td>${fmtArs(c.otras)}</td><td>${fmtArs(c.sinDato)}</td><td><b>${fmtArs(c.total)}</b></td></tr>`
+      ).join('') || '<tr><td colspan="6">Sin cobros registrados.</td></tr>';
+      const cobroActual = (m.cobrosPorFormaPago || []).find((c) => c.mes === mesActualKey);
+      document.getElementById('dash-cobros-cuentas').innerHTML = cobroActual && Object.keys(cobroActual.cuentas).length
+        ? Object.entries(cobroActual.cuentas).sort(([, a], [, b]) => b - a).map(([k, v]) => `${escapeHtmlAdmin(k)}: <b>${fmtArs(v)}</b>`).join(' · ')
+        : 'Sin transferencias este mes.';
 
       // (e) Ticket promedio
       document.querySelector('#dash-ticket-mensual tbody').innerHTML = (m.ticketPorMes || []).slice(-12).reverse().map((t) =>

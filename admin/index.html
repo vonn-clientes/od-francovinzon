@@ -276,6 +276,17 @@
           <div class="table-wrap"><table id="sf-tabla"><thead><tr><th>Nombre</th><th>DNI</th><th>Teléfono</th><th>Ficha</th><th></th></tr></thead><tbody></tbody></table></div>
         </div>
 
+        <div class="card" id="card-seguimiento">
+          <h2>Pacientes para contactar</h2>
+          <p class="hint">Para escribirles por WhatsApp y ofrecerles un turno. Solo aparecen los que no tienen un turno futuro cargado.</p>
+          <h3 style="font-size:14px;margin:10px 0 6px;">Con deuda reciente y sin turno próximo</h3>
+          <p class="hint">Último pago hace menos de <select id="seg-dias"><option value="30">30 días</option><option value="60" selected>60 días</option><option value="90">90 días</option></select></p>
+          <div class="table-wrap"><table id="seg-deuda"><thead><tr><th>Paciente</th><th>Debe</th><th>Sin pagar</th><th>Última visita</th><th></th></tr></thead><tbody></tbody></table></div>
+          <h3 style="font-size:14px;margin:16px 0 6px;">Para reactivar (al día, sin venir hace tiempo)</h3>
+          <p class="hint">Sin venir hace más de <select id="seg-meses"><option value="1">1 mes</option><option value="2">2 meses</option><option value="3" selected>3 meses</option><option value="6">6 meses</option></select></p>
+          <div class="table-wrap"><table id="seg-react"><thead><tr><th>Paciente</th><th>Última visita</th><th></th></tr></thead><tbody></tbody></table></div>
+        </div>
+
         <div class="card" id="card-publico">
           <h2>Público objetivo (buyer persona)</h2>
           <p class="hint">Se calcula con todas las fichas, los turnos de los últimos 12 meses y el historial de visitas. Es anónimo: solo totales y porcentajes, sin nombres ni datos de contacto. <span id="pub-generado"></span> <button class="btn btn-outline" id="pub-refrescar" style="padding:5px 12px;font-size:11.5px;">Actualizar</button></p>
@@ -611,7 +622,7 @@
         // La lista operativa y los totales de pacientes vienen de la planilla
         // consolidada; cargarlos no debe quedar esperando el escaneo financiero de
         // cientos de fichas ni el perfil de audiencia.
-        await Promise.all([cargarDashboard(), cargarPacientesTotales(), cargarSinFicha()]);
+        await Promise.all([cargarDashboard(), cargarPacientesTotales(), cargarSinFicha(), cargarSeguimiento()]);
         await cargarDashboardAvanzado();
       },
       'reserva-online': cargarReservaOnline,
@@ -1054,6 +1065,38 @@
           <td><button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-idx="${sinFichaLista.indexOf(p)}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td></tr>`;
     }).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
   }
+  // ---- Pacientes para contactar (deuda reciente sin turno / reactivar) ----
+  function linkWhatsapp(tel, nombre, tipo) {
+    let d = String(tel || '').replace(/\D/g, '').replace(/^0+/, '');
+    if (d.length < 10) return '';
+    if (!d.startsWith('54')) d = '549' + d.replace(/^15/, '');
+    const primero = String(nombre || '').trim().split(/\s+/)[0] || '';
+    const txt = tipo === 'deuda'
+      ? `Hola ${primero}, te escribimos del consultorio del Od. Franco Vinzón. ¿Querés que te agendemos un próximo turno?`
+      : `Hola ${primero}, te escribimos del consultorio del Od. Franco Vinzón. Hace un tiempo que no te vemos, ¿querés agendar un control?`;
+    return `<a class="btn btn-outline" style="padding:4px 10px;font-size:12px;" target="_blank" rel="noopener" href="https://wa.me/${d}?text=${encodeURIComponent(txt)}">WhatsApp</a>`;
+  }
+  async function cargarSeguimiento() {
+    const tDeuda = document.querySelector('#seg-deuda tbody');
+    const tReact = document.querySelector('#seg-react tbody');
+    tDeuda.innerHTML = tReact.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
+    try {
+      const r = await apiGet('seguimiento', { dias: document.getElementById('seg-dias').value, meses: document.getElementById('seg-meses').value });
+      if (!r.success) throw new Error(r.error || 'Sin datos.');
+      const fecha = (iso) => iso ? iso.split('-').reverse().join('/') : '—';
+      tDeuda.innerHTML = r.deudaSinTurno.map((p) =>
+        `<tr><td>${escapeHtmlAdmin(p.nombre)}</td><td>$${Number(p.saldo).toLocaleString('es-AR')}</td><td>${p.diasSinPago ?? '—'} días</td><td>${fecha(p.ultimaVisita)}</td><td>${linkWhatsapp(p.telefono, p.nombre, 'deuda')}</td></tr>`
+      ).join('') || '<tr><td colspan="5">Nadie para contactar con esos filtros.</td></tr>';
+      tReact.innerHTML = r.paraReactivar.map((p) =>
+        `<tr><td>${escapeHtmlAdmin(p.nombre)}</td><td>${fecha(p.ultimaVisita)}</td><td>${linkWhatsapp(p.telefono, p.nombre, 'react')}</td></tr>`
+      ).join('') || '<tr><td colspan="3">Nadie para reactivar con ese filtro.</td></tr>';
+    } catch (e) {
+      if (e.message !== 'unauthorized') tDeuda.innerHTML = tReact.innerHTML = `<tr><td colspan="5">No se pudo cargar: ${escapeHtmlAdmin(e.message || 'Error de conexión.')}</td></tr>`;
+    }
+  }
+  document.getElementById('seg-dias').addEventListener('change', cargarSeguimiento);
+  document.getElementById('seg-meses').addEventListener('change', cargarSeguimiento);
+
   async function cargarSinFicha() {
     const tbody = document.querySelector('#sf-tabla tbody');
     tbody.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';

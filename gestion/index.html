@@ -381,18 +381,24 @@
     #print-prompt.show { transform: translateY(0); }
   }
 
-  .af-box { max-width: 440px !important; width: 94vw; max-height: 88vh; overflow: auto; }
-  .af-box input[type=text], .af-box input[type=tel] { width: 100%; padding: 10px 12px; border: 1.5px solid #d6dbe4; border-radius: 12px; font-size: 14px; margin-bottom: 8px; }
+  .af-box { max-width: 460px !important; width: 94vw; max-height: 88vh; overflow: auto; }
+  .af-box input { width: 100%; padding: 10px 12px; border: 1.5px solid #d6dbe4; border-radius: 12px; font-size: 15px; font-family: inherit; color: var(--navy); background: #fff; margin: 0; }
+  .af-box input:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(30,58,95,.12); }
+  .af-f { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; min-width: 0; }
+  .af-f input { text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .af-sec { font-size: 12px; font-weight: 800; color: var(--navy); margin: 14px 0 8px; padding-bottom: 5px; border-bottom: 1px solid #e3e7ee; }
+  .af-seg { display: flex; gap: 0; margin-bottom: 10px; border: 1.5px solid var(--navy); border-radius: 100px; overflow: hidden; }
   .af-lista { max-height: 260px; overflow: auto; margin: 6px 0 10px; }
   .af-item { display: block; width: 100%; text-align: left; background: #f4f6fa; border: 1.5px solid transparent; border-radius: 12px; padding: 9px 12px; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
   .af-item small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
   .af-item.sel { border-color: var(--navy); background: #e8eef7; }
   .af-msg { font-size: 13px; min-height: 18px; margin: 4px 0 8px; color: var(--muted); }
   .af-msg.error { color: #b3261e; }
-  .af-cob { flex: 1; padding: 10px; border-radius: 100px; border: 1.5px solid var(--navy); background: #fff; color: var(--navy); font-weight: 700; font-size: 13.5px; }
+  .af-cob { flex: 1; padding: 10px; border: none; background: #fff; color: var(--navy); font-weight: 700; font-size: 14px; }
   .af-cob[aria-pressed="true"] { background: var(--navy); color: #fff; }
   .af-link { background: none; border: none; color: var(--navy); font-weight: 700; text-decoration: underline; padding: 4px 0; font-size: 13.5px; }
-  .af-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
+  .af-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+  @media (max-width: 420px) { .af-grid { grid-template-columns: 1fr; } }
   .af-grid .full { grid-column: 1 / -1; }
   .confirm-overlay {
     position: fixed; inset: 0; background: rgba(30,58,95,.35); display: flex; align-items: center; justify-content: center;
@@ -863,30 +869,34 @@
   <div class="confirm-box af-box">
     <h3 id="af-titulo">Asignar ficha</h3>
     <div id="af-vista-buscar">
-      <input type="text" id="af-buscar" placeholder="Buscar ficha por nombre o DNI" autocomplete="off">
+      <input type="text" id="af-buscar" style="margin-bottom:8px" placeholder="Buscar ficha por nombre o DNI" autocomplete="off">
       <div class="af-lista" id="af-lista"></div>
       <button type="button" class="af-link" id="af-ir-crear">No encuentro la ficha → Crear ficha nueva</button>
     </div>
     <div id="af-vista-crear" class="hidden">
+      <div class="af-sec">Datos personales</div>
       <div class="af-grid">
-        <input type="text" id="af-nombre" placeholder="Nombre *">
-        <input type="text" id="af-apellido" placeholder="Apellido *">
-        <input type="text" id="af-dni" inputmode="numeric" placeholder="DNI">
-        <input type="text" id="af-fnac" placeholder="Fecha de nacimiento (dd/mm/aaaa)">
-        <input type="tel" id="af-tel" placeholder="Teléfono">
-        <input type="email" id="af-email" class="full" placeholder="Correo electrónico" autocomplete="off">
-        <input type="text" id="af-dom" class="full" placeholder="Domicilio">
-        <input type="text" id="af-loc" class="full" list="localidades-lista" placeholder="Localidad (elegí o escribí otra)" autocomplete="off">
+        <label class="af-f">Nombre *<input type="text" id="af-nombre" autocomplete="off"></label>
+        <label class="af-f">Apellido *<input type="text" id="af-apellido" autocomplete="off"></label>
+        <label class="af-f">DNI<input type="text" id="af-dni" inputmode="numeric" autocomplete="off"></label>
+        <label class="af-f">Fecha de nacimiento<input type="text" id="af-fnac" inputmode="numeric" placeholder="dd/mm/aaaa" autocomplete="off"></label>
       </div>
-      <div style="margin:2px 0 8px;font-size:13px;font-weight:700;color:var(--navy)">¿Es paciente particular o tiene obra social? *</div>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
+      <div class="af-sec">Contacto</div>
+      <div class="af-grid">
+        <label class="af-f">Teléfono<input type="tel" id="af-tel" autocomplete="off"></label>
+        <label class="af-f">Correo electrónico<input type="email" id="af-email" autocomplete="off"></label>
+        <label class="af-f full">Domicilio<input type="text" id="af-dom" autocomplete="off"></label>
+        <label class="af-f full">Localidad<input type="text" id="af-loc" list="localidades-lista" placeholder="Elegí una o escribí otra" autocomplete="off"></label>
+      </div>
+      <div class="af-sec">Cobertura *</div>
+      <div class="af-seg">
         <button type="button" class="af-cob" data-cob="particular" aria-pressed="false">Particular</button>
-        <button type="button" class="af-cob" data-cob="obra" aria-pressed="false">Tiene obra social</button>
+        <button type="button" class="af-cob" data-cob="obra" aria-pressed="false">Obra social</button>
       </div>
       <div id="af-obra-wrap" class="af-grid hidden">
-        <input type="text" id="af-os" class="full" placeholder="Obra social *">
-        <input type="text" id="af-afiliado" placeholder="N° de afiliado">
-        <input type="text" id="af-plan" placeholder="Plan">
+        <label class="af-f full">Obra social *<input type="text" id="af-os" autocomplete="off"></label>
+        <label class="af-f">N° de afiliado<input type="text" id="af-afiliado" autocomplete="off"></label>
+        <label class="af-f">Plan<input type="text" id="af-plan" autocomplete="off"></label>
       </div>
       <datalist id="localidades-lista"><option value="Concepción del Uruguay"><option value="Gualeguaychú"><option value="San José"><option value="Caseros"><option value="Urdinarrain"><option value="San Justo"><option value="Colón"><option value="Basavilbaso"><option value="Villa Elisa"><option value="Pronunciamiento"></datalist>
       <button type="button" class="af-link" id="af-ir-buscar">← Volver a buscar ficha</button>

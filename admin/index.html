@@ -1008,27 +1008,33 @@
   const asignadasAhora = new Map(); // fila -> { id, nombre } (se ven un rato, con "Cancelar asignación")
   let fichasTodas = null;       // fichas de /pacientes (para el pop-up)
   let fichasError = false;
-  let modalFila = 0, modalFichaId = '', modalNombrePersona = '';
+  let modalIdx = -1, modalFila = 0, modalFichaId = '', modalNombrePersona = '';
 
+  const claveSf = (p) => (p.virtual ? `v:${p.dni || p.telefono}` : p.fila);
+  function turnoSf(p) {
+    if (!p.proximoTurno) return '';
+    const f = new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(p.proximoTurno));
+    return `<small style="display:block;color:#666">Turno: ${escapeHtmlAdmin(f)}${p.virtual ? ' · aún no en la planilla' : ''}</small>`;
+  }
   function renderSinFicha() {
     const tbody = document.querySelector('#sf-tabla tbody');
     const loteBtn = document.getElementById('sf-lote');
-    const pendientes = sinFichaLista.filter((p) => !asignadasAhora.has(p.fila));
+    const pendientes = sinFichaLista.filter((p) => !asignadasAhora.has(claveSf(p)));
     const conSug = pendientes.filter((p) => p.sugerida).length;
     loteBtn.textContent = `Asignar las ${conSug} coincidencias exactas por nombre`;
     loteBtn.classList.toggle('hidden', !conSug);
     tbody.innerHTML = sinFichaLista.map((p) => {
-      const as = asignadasAhora.get(p.fila);
+      const as = asignadasAhora.get(claveSf(p));
       if (as) {
         return `<tr>
-          <td>${escapeHtmlAdmin(p.nombre)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
+          <td>${escapeHtmlAdmin(p.nombre)}${turnoSf(p)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
           <td class="sf-ok" colspan="1">✓ Asignado a ${escapeHtmlAdmin(as.nombre)}</td>
-          <td><button class="btn btn-outline" data-sf-deshacer="${p.fila}">Cancelar asignación</button></td></tr>`;
+          <td><button class="btn btn-outline" data-sf-deshacer="${as.fila || p.fila}" data-sf-clave="${escapeHtmlAdmin(String(claveSf(p)))}">Cancelar asignación</button></td></tr>`;
       }
       return `<tr>
-          <td>${escapeHtmlAdmin(p.nombre)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
+          <td>${escapeHtmlAdmin(p.nombre)}${turnoSf(p)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
           <td>${p.candidatas?.length ? `<div class="sf-candidatas"><span class="sf-candidatas-label">Posibles coincidencias</span>${p.candidatas.slice(0, 3).map((c) => `<button type="button" class="btn btn-outline sf-candidata" data-sf-candidato="${escapeHtmlAdmin(c.id)}" data-sf-motivo="${escapeHtmlAdmin(c.motivo)}" data-sf-nombre-ficha="${escapeHtmlAdmin(c.nombre)}"><span>${escapeHtmlAdmin(c.nombre)}</span><small>${escapeHtmlAdmin(c.motivo)}${c.dni ? ' · DNI ' + escapeHtmlAdmin(c.dni) : ' · Sin DNI en ficha'}</small></button>`).join('')}</div>` : ''}</td>
-          <td><button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td></tr>`;
+          <td><button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-idx="${sinFichaLista.indexOf(p)}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td></tr>`;
     }).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
   }
   async function cargarSinFicha() {
@@ -1061,9 +1067,9 @@
       </button>`).join('') || '<div class="sf-item">No hay fichas que coincidan con la búsqueda.</div>';
   }
   let modalReturnFocus = null;
-  async function abrirModalFicha(fila, nombre, sugerenciaId = '', motivo = '', nombreFicha = '') {
+  async function abrirModalFicha(fila, nombre, sugerenciaId = '', motivo = '', nombreFicha = '', idx = -1) {
     modalReturnFocus = document.activeElement;
-    modalFila = fila; modalFichaId = sugerenciaId; modalNombrePersona = nombre;
+    modalIdx = idx; modalFila = fila; modalFichaId = sugerenciaId; modalNombrePersona = nombre;
     document.getElementById('sf-modal-titulo').textContent = `Elegir la ficha de ${nombre}`;
     document.getElementById('sf-modal-buscar').value = sugerenciaId ? nombreFicha : '';
     document.getElementById('sf-modal-asignar').disabled = !sugerenciaId;
@@ -1114,9 +1120,11 @@
     btn.disabled = true;
     setMsg('sf-modal-msg', 'Asignando…', '');
     try {
-      const r = await apiPost('asignar-ficha', { fila: modalFila, fichaId: modalFichaId });
+      const persona = sinFichaLista[modalIdx];
+      const virtual = persona?.virtual ? { nombre: persona.nombre, dni: persona.dni, telefono: persona.telefono } : undefined;
+      const r = await apiPost('asignar-ficha', { fila: modalFila, fichaId: modalFichaId, virtual });
       if (r.success) {
-        asignadasAhora.set(modalFila, { id: ficha.id, nombre: `${ficha.nombre} ${ficha.apellido}`.trim() });
+        asignadasAhora.set(persona ? claveSf(persona) : modalFila, { id: ficha.id, nombre: `${ficha.nombre} ${ficha.apellido}`.trim(), fila: r.fila || modalFila });
         cerrarModalFicha();
         renderSinFicha();
         setMsg('sf-msg', 'Asignada. Si te equivocaste, tocá "Cancelar asignación".', 'ok');
@@ -1132,19 +1140,18 @@
   document.querySelector('#sf-tabla').addEventListener('click', async (ev) => {
     const candidata = ev.target.closest('[data-sf-candidato]');
     if (candidata) {
-      const fila = Number(candidata.closest('tr').querySelector('[data-sf-elegir]')?.dataset.sfElegir);
-      const nombre = candidata.closest('tr').querySelector('[data-sf-elegir]')?.dataset.sfNombre || '';
-      abrirModalFicha(fila, nombre, candidata.dataset.sfCandidato, candidata.dataset.sfMotivo, candidata.dataset.sfNombreFicha);
+      const el = candidata.closest('tr').querySelector('[data-sf-elegir]');
+      abrirModalFicha(Number(el?.dataset.sfElegir), el?.dataset.sfNombre || '', candidata.dataset.sfCandidato, candidata.dataset.sfMotivo, candidata.dataset.sfNombreFicha, Number(el?.dataset.sfIdx));
       return;
     }
     const elegir = ev.target.closest('[data-sf-elegir]');
-    if (elegir) { abrirModalFicha(Number(elegir.dataset.sfElegir), elegir.dataset.sfNombre); return; }
+    if (elegir) { abrirModalFicha(Number(elegir.dataset.sfElegir), elegir.dataset.sfNombre, '', '', '', Number(elegir.dataset.sfIdx)); return; }
     const deshacer = ev.target.closest('[data-sf-deshacer]');
     if (deshacer) {
       deshacer.disabled = true;
       try {
         const r = await apiPost('desasignar-ficha', { fila: Number(deshacer.dataset.sfDeshacer) });
-        if (r.success) { asignadasAhora.delete(Number(deshacer.dataset.sfDeshacer)); renderSinFicha(); setMsg('sf-msg', 'Asignación cancelada.', 'ok'); }
+        if (r.success) { asignadasAhora.delete(deshacer.dataset.sfClave.startsWith('v:') ? deshacer.dataset.sfClave : Number(deshacer.dataset.sfClave)); renderSinFicha(); setMsg('sf-msg', 'Asignación cancelada.', 'ok'); }
         else { setMsg('sf-msg', r.error || 'No se pudo cancelar.', 'error'); deshacer.disabled = false; }
       } catch (e) { if (e.message !== 'unauthorized') { setMsg('sf-msg', 'Error de red.', 'error'); deshacer.disabled = false; } }
       return;

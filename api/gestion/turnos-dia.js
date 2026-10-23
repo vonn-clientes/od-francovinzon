@@ -6,7 +6,7 @@ import {
 import { avisarFallo } from '../../lib/alertas.js';
 import { conReintentos } from '../../lib/retry.js';
 import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
-import { normalizarDni } from '../../lib/pacientesSheet.js';
+import { normalizarDni, normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
 
 export default async function handler(req, res) {
   if (!isValidGestionKey(req.query.key)) {
@@ -91,17 +91,24 @@ export default async function handler(req, res) {
     // EXACTO con una persona del registro consolidado que ya tiene ficha. Si algo falla
     // o hay duda, no se marca nada (sin fichaId no aparece el botón).
     try {
-      const conDni = items.filter((it) => it.dni && it.tipo !== 'bloqueo');
-      if (conDni.length) {
+      const candidatos = items.filter((it) => (it.dni || it.telefono) && it.tipo !== 'bloqueo');
+      if (candidatos.length) {
         const filas = await listarPacientesConsolidados({ cache: true });
-        const porDni = new Map();
-        for (const f of filas) {
-          const d = f.dni && normalizarDni(f.dni);
-          if (!d || !f.fichaId) continue;
-          porDni.set(d, porDni.has(d) ? null : f.fichaId);
-        }
-        for (const it of conDni) {
-          const fichaId = porDni.get(normalizarDni(it.dni));
+        // Mapas valor -> fichaId; null si el valor está en más de una ficha (ambiguo).
+        const mapa = (clave) => {
+          const m = new Map();
+          for (const f of filas) {
+            const k = clave(f);
+            if (!k || !f.fichaId) continue;
+            m.set(k, m.has(k) && m.get(k) !== f.fichaId ? null : f.fichaId);
+          }
+          return m;
+        };
+        const porDni = mapa((f) => f.dni && normalizarDni(f.dni));
+        const porTel = mapa((f) => f.telefono && normalizarTelefonoMapeo(f.telefono));
+        for (const it of candidatos) {
+          // DNI primero (identificador principal); teléfono solo si el turno no tiene DNI.
+          const fichaId = it.dni ? porDni.get(normalizarDni(it.dni)) : porTel.get(normalizarTelefonoMapeo(it.telefono));
           if (fichaId) it.fichaId = fichaId;
         }
       }

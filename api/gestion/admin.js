@@ -9,7 +9,7 @@ import { isValidGestionKey } from '../../lib/googleCalendar.js';
 import {
   getCalendarClient, CALENDAR_ID, SOBRETURNOS_CALENDAR_ID, BLOCK_MARKER, TIME_ZONE, WEEKLY_SCHEDULE,
   SLOT_MINUTES, pad2, toArgDate, eventBounds, formatArgDay, formatArgTime, extraerTelefono, extraerConfirmado,
-  extraerEsNuevoPaciente, extraerMotivo, getHorariosLibresDia,
+  extraerEsNuevoPaciente, extraerMotivo, getHorariosLibresDia, extraerDni,
 } from '../../lib/googleCalendar.js';
 import { getPacientesDriveClient, getPacientesSheetsClient } from '../../lib/googleOAuthPacientes.js';
 import {
@@ -22,8 +22,8 @@ import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
   leerActividadReciente, leerAlertasRecientes,
 } from '../../lib/adminConfig.js';
-import { listarPacientesConsolidados, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre, candidatasParaFicha, desasignarFila } from '../../lib/pacientesConsolidados.js';
-import { normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
+import { listarPacientesConsolidados, upsertPacienteConsolidado, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre, candidatasParaFicha, desasignarFila } from '../../lib/pacientesConsolidados.js';
+import { normalizarTelefonoMapeo, normalizarDni } from '../../lib/pacientesSheet.js';
 import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
 
@@ -1099,6 +1099,30 @@ function resumirPacientesTotales(pacientes = {}) {
   return { total: total ?? null, totalFichas: totalFichas ?? null, totalSoloTurno: totalSoloTurno ?? null, ...(error ? { error } : {}) };
 }
 
+
+// Personas con turno en los próximos `dias` días (ambos calendarios, sin bloqueos),
+// una por DNI/teléfono, con el turno más cercano. Para el panel "sin ficha".
+async function leerProximosTurnosPersonas(dias) {
+  const calendar = getCalendarClient();
+  const timeMin = new Date().toISOString();
+  const timeMax = new Date(Date.now() + dias * 86400000).toISOString();
+  const [a, b] = await Promise.all([CALENDAR_ID, SOBRETURNOS_CALENDAR_ID].map((calendarId) =>
+    conReintentos(() => calendar.events.list({ calendarId, timeMin, timeMax, singleEvents: true, orderBy: 'startTime', maxResults: 2500 }))));
+  const evs = [...(a.data.items || []), ...(b.data.items || [])]
+    .filter((ev) => ev.start?.dateTime && !(ev.description || '').includes(BLOCK_MARKER) && (ev.summary || '').trim())
+    .sort((x, y) => x.start.dateTime.localeCompare(y.start.dateTime));
+  const out = [];
+  for (const ev of evs) {
+    const dni = extraerDni(ev.description);
+    const telefono = extraerTelefono(ev.description);
+    const nombre = (ev.summary || '').trim();
+    const ya = out.find((t) => (dni && normalizarDni(t.dni) === normalizarDni(dni)) || (telefono && normalizarTelefonoMapeo(t.telefono) === normalizarTelefonoMapeo(telefono)) || (!dni && !telefono && t.nombre === nombre));
+    if (ya) continue;
+    out.push({ nombre, dni, telefono, start: new Date(ev.start.dateTime).toISOString() });
+  }
+  return out;
+}
+
 // ---------- Pacientes con turnos pero sin ficha ----------
 // Son las filas de "Pacientes consolidados" sin fichaId. Se lee en vivo (sin snapshot).
 async function getSinFicha(req, res) {
@@ -1136,6 +1160,15 @@ async function getSinFicha(req, res) {
   const filasConFichasDeDrive = [...filas, ...fichasPorId.values()];
   const sug = sugerenciasPorNombre(filasConFichasDeDrive);
   const nombreFicha = new Map([...fichasPorId].map(([id, f]) => [id, `${f.nombre} ${f.apellido}`.trim()]));
+  // Próximos turnos (21 días): sirven para ordenar por fecha de turno y para mostrar
+  // a quienes tienen turno pero todavía no figuran en la planilla consolidada.
+  const proximos = await leerProximosTurnosPersonas(21).catch((err) => {
+    console.warn('[admin.js] sin-ficha: no se pudieron leer los próximos turnos:', err?.message || err);
+    return [];
+  });
+  const claveDni = (v) => normalizarDni(v);
+  const claveTel = (v) => normalizarTelefonoMapeo(v);
+  const turnoDe = (dni, tel) => proximos.find((t) => (claveDni(dni) && claveDni(t.dni) === claveDni(dni)) || (claveTel(tel) && claveTel(t.telefono) === claveTel(tel)));
   const sinFicha = filas
     .filter((f) => !f.fichaId)
     .map((f) => ({
@@ -1143,14 +1176,38 @@ async function getSinFicha(req, res) {
       candidatas: candidatasParaFicha(f, filasConFichasDeDrive),
       fila: f.fila, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni, telefono: f.telefono,
       turnosPasados: f.turnosPasados || 0, ultimaVisita: f.ultimaVisita || '',
-    }))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+      proximoTurno: turnoDe(f.dni, f.telefono)?.start || '',
+    }));
+  // Personas con turno próximo que NO están en la planilla (o están con ficha → se omiten).
+  const conFichaDni = new Set(filas.filter((f) => f.fichaId && claveDni(f.dni)).map((f) => claveDni(f.dni)));
+  const conFichaTel = new Set(filas.filter((f) => f.fichaId && claveTel(f.telefono)).map((f) => claveTel(f.telefono)));
+  const enPlanilla = (t) => filas.some((f) => (claveDni(t.dni) && claveDni(f.dni) === claveDni(t.dni)) || (claveTel(t.telefono) && claveTel(f.telefono) === claveTel(t.telefono)));
+  const virtuales = [];
+  let sinDatosClave = 0;
+  for (const t of proximos) {
+    if (!claveDni(t.dni) && !claveTel(t.telefono)) { sinDatosClave += 1; continue; }
+    if ((claveDni(t.dni) && conFichaDni.has(claveDni(t.dni))) || (claveTel(t.telefono) && conFichaTel.has(claveTel(t.telefono)))) continue;
+    if (enPlanilla(t)) continue;
+    if (virtuales.some((v) => (claveDni(t.dni) && claveDni(v.dni) === claveDni(t.dni)) || (claveTel(t.telefono) && claveTel(v.telefono) === claveTel(t.telefono)))) continue;
+    const persona = { nombre: t.nombre, apellido: '', dni: t.dni, telefono: t.telefono };
+    virtuales.push({
+      virtual: true, fila: 0, nombre: t.nombre, dni: t.dni, telefono: t.telefono,
+      sugerida: null, candidatas: candidatasParaFicha(persona, filasConFichasDeDrive),
+      turnosPasados: 0, ultimaVisita: '', proximoTurno: t.start,
+    });
+  }
+  const sinFichaTodos = [...sinFicha, ...virtuales].sort((a, b) => {
+    if (a.proximoTurno && b.proximoTurno) return a.proximoTurno.localeCompare(b.proximoTurno) || a.nombre.localeCompare(b.nombre, 'es');
+    if (a.proximoTurno) return -1;
+    if (b.proximoTurno) return 1;
+    return a.nombre.localeCompare(b.nombre, 'es');
+  });
   const vistos = new Set();
   const fichas = [...fichasPorId]
     .filter(([id]) => !vistos.has(id) && vistos.add(id))
     .map(([id, f]) => ({ id, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-  res.status(200).json({ success: true, sinFicha, fichas: [] });
+  res.status(200).json({ success: true, sinFicha: sinFichaTodos, sinDatosClave, fichas: [] });
 }
 
 // Asigna a mano una persona de turnos a una ficha existente (o, con lote:true, todas las
@@ -1161,10 +1218,21 @@ async function postAsignarFicha(req, res) {
     await logActividad({ tipo: 'asignar_ficha', detalle: `Asignación por nombre exacto: ${r.asignadas} personas`, actor: 'admin' });
     return res.status(200).json({ success: true, ...r });
   }
-  const r = await asignarFilaAFicha(req.body.fila, req.body.fichaId);
+  let fila = req.body.fila;
+  const v = req.body.virtual;
+  if (v && (v.dni || v.telefono)) {
+    // Persona con turno que aún no está en la planilla: se crea la fila y se asigna.
+    await upsertPacienteConsolidado({ telefono: v.telefono, nombre: v.nombre, apellido: '', dni: v.dni, origen: 'turno' });
+    const filas = await listarPacientesConsolidados();
+    const creada = filas.find((f) => (normalizarDni(v.dni) && normalizarDni(f.dni) === normalizarDni(v.dni))
+      || (normalizarTelefonoMapeo(v.telefono) && normalizarTelefonoMapeo(f.telefono) === normalizarTelefonoMapeo(v.telefono)));
+    if (!creada) return res.status(500).json({ success: false, error: 'No se pudo registrar a la persona. Probá de nuevo.' });
+    fila = creada.fila;
+  }
+  const r = await asignarFilaAFicha(fila, req.body.fichaId);
   if (!r.ok) return res.status(400).json({ success: false, error: r.error });
   await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${r.nombre} asignado a ficha ${req.body.fichaId}`, actor: 'admin' });
-  res.status(200).json({ success: true });
+  res.status(200).json({ success: true, fila });
 }
 
 async function postDesasignarFicha(req, res) {

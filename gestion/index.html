@@ -886,7 +886,7 @@
         <label class="af-f">Teléfono<input type="tel" id="af-tel" autocomplete="off"></label>
         <label class="af-f">Correo electrónico<input type="email" id="af-email" autocomplete="off"></label>
         <label class="af-f full">Domicilio<input type="text" id="af-dom" autocomplete="off"></label>
-        <label class="af-f full">Localidad<input type="text" id="af-loc" list="localidades-lista" placeholder="Elegí una o escribí otra" autocomplete="off"></label>
+        <label class="af-f full">Localidad<input type="text" id="af-loc" data-combo-localidad placeholder="Elegí una o escribí otra" autocomplete="off"></label>
       </div>
       <div class="af-sec">Cobertura *</div>
       <div class="af-seg">
@@ -898,7 +898,6 @@
         <label class="af-f">N° de afiliado<input type="text" id="af-afiliado" autocomplete="off"></label>
         <label class="af-f">Plan<input type="text" id="af-plan" autocomplete="off"></label>
       </div>
-      <datalist id="localidades-lista"><option value="Concepción del Uruguay"><option value="Gualeguaychú"><option value="San José"><option value="Caseros"><option value="Urdinarrain"><option value="San Justo"><option value="Colón"><option value="Basavilbaso"><option value="Villa Elisa"><option value="Pronunciamiento"></datalist>
       <button type="button" class="af-link" id="af-ir-buscar">← Volver a buscar ficha</button>
     </div>
     <div class="af-msg" id="af-msg"></div>
@@ -3644,6 +3643,7 @@
 <script>
   window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
 </script>
+<script src="/assets/combo-localidad.js"></script>
 <script defer src="/_vercel/insights/script.js"></script>
 <script>
   window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };

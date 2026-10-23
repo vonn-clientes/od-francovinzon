@@ -469,7 +469,7 @@
       </div>
       <div class="field-row">
         <div class="field"><label for="np-domicilio">Domicilio</label><input type="text" id="np-domicilio"></div>
-        <div class="field"><label for="np-localidad">Localidad</label><input type="text" id="np-localidad" list="localidades-lista" placeholder="Elegí o escribí otra" autocomplete="off"></div>
+        <div class="field"><label for="np-localidad">Localidad</label><input type="text" id="np-localidad" data-combo-localidad placeholder="Elegí o escribí otra" autocomplete="off"></div>
       </div>
       <div class="field">
         <label>¿Es paciente particular o tiene obra social? *</label>
@@ -485,7 +485,6 @@
           <div class="field"><label for="np-plan">Plan</label><input type="text" id="np-plan"></div>
         </div>
       </div>
-      <datalist id="localidades-lista"><option value="Concepción del Uruguay"><option value="Gualeguaychú"><option value="San José"><option value="Caseros"><option value="Urdinarrain"><option value="San Justo"><option value="Colón"><option value="Basavilbaso"><option value="Villa Elisa"><option value="Pronunciamiento"></datalist>
       <div class="dup-warning hidden" id="np-dup-warning">
         <div class="dup-warning-text">Ya existe una ficha con este DNI: <span id="np-dup-nombre"></span></div>
         <button class="btn-confirm" id="np-dup-abrir">Abrir ficha</button>
@@ -582,7 +581,7 @@
         <div class="field full"><label for="ficha-domicilio">Domicilio</label><input type="text" id="ficha-domicilio" data-campo="domicilio"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label for="ficha-localidad">Localidad</label><input type="text" id="ficha-localidad" data-campo="localidad"></div>
+        <div class="field"><label for="ficha-localidad">Localidad</label><input type="text" id="ficha-localidad" data-campo="localidad" data-combo-localidad></div>
         <div class="field"><label for="ficha-telefono">Teléfono</label><input type="tel" id="ficha-telefono" data-campo="telefono" inputmode="tel"></div>
       </div>
       <div class="field-row">
@@ -3507,5 +3506,6 @@ document.addEventListener('input', (ev) => {
   if (f !== v) el.value = f;
 });
 </script>
+<script src="/assets/combo-localidad.js"></script>
 </body>
 </html>

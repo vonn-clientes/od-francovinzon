@@ -379,6 +379,17 @@
     #print-prompt.show { transform: translateY(0); }
   }
 
+  .af-box { max-width: 440px !important; width: 94vw; max-height: 88vh; overflow: auto; }
+  .af-box input[type=text], .af-box input[type=tel] { width: 100%; padding: 10px 12px; border: 1.5px solid #d6dbe4; border-radius: 12px; font-size: 14px; margin-bottom: 8px; }
+  .af-lista { max-height: 260px; overflow: auto; margin: 6px 0 10px; }
+  .af-item { display: block; width: 100%; text-align: left; background: #f4f6fa; border: 1.5px solid transparent; border-radius: 12px; padding: 9px 12px; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
+  .af-item small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .af-item.sel { border-color: var(--navy); background: #e8eef7; }
+  .af-msg { font-size: 13px; min-height: 18px; margin: 4px 0 8px; color: var(--muted); }
+  .af-msg.error { color: #b3261e; }
+  .af-link { background: none; border: none; color: var(--navy); font-weight: 700; text-decoration: underline; padding: 4px 0; font-size: 13.5px; }
+  .af-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
+  .af-grid .full { grid-column: 1 / -1; }
   .confirm-overlay {
     position: fixed; inset: 0; background: rgba(30,58,95,.35); display: flex; align-items: center; justify-content: center;
     padding: 20px; z-index: 998; opacity: 0; transition: opacity .18s ease;
@@ -841,6 +852,37 @@
       <button class="tasks-modal-close" id="tasks-modal-close" aria-label="Cerrar">✕</button>
     </div>
     <div class="tasks-modal-list" id="tasks-modal-list"></div>
+  </div>
+</div>
+
+<div class="confirm-overlay hidden" id="af-overlay">
+  <div class="confirm-box af-box">
+    <h3 id="af-titulo">Asignar ficha</h3>
+    <div id="af-vista-buscar">
+      <input type="text" id="af-buscar" placeholder="Buscar ficha por nombre o DNI" autocomplete="off">
+      <div class="af-lista" id="af-lista"></div>
+      <button type="button" class="af-link" id="af-ir-crear">No encuentro la ficha → Crear ficha nueva</button>
+    </div>
+    <div id="af-vista-crear" class="hidden">
+      <div class="af-grid">
+        <input type="text" id="af-nombre" placeholder="Nombre *">
+        <input type="text" id="af-apellido" placeholder="Apellido *">
+        <input type="text" id="af-dni" inputmode="numeric" placeholder="DNI">
+        <input type="text" id="af-fnac" placeholder="Fecha de nacimiento (dd/mm/aaaa)">
+        <input type="tel" id="af-tel" placeholder="Teléfono">
+        <input type="text" id="af-os" placeholder="Obra social (vacío = particular)">
+        <input type="text" id="af-afiliado" placeholder="N° de afiliado">
+        <input type="text" id="af-plan" placeholder="Plan">
+        <input type="text" id="af-dom" class="full" placeholder="Domicilio">
+        <input type="text" id="af-loc" class="full" placeholder="Localidad">
+      </div>
+      <button type="button" class="af-link" id="af-ir-buscar">← Volver a buscar ficha</button>
+    </div>
+    <div class="af-msg" id="af-msg"></div>
+    <div class="confirm-actions">
+      <button type="button" id="af-cancelar" style="background:#eef0f4;color:var(--navy)">Cancelar</button>
+      <button type="button" id="af-confirmar" style="background:var(--navy);color:#fff" disabled>Asignar ficha</button>
+    </div>
   </div>
 </div>
 
@@ -1715,6 +1757,7 @@
       botones.push(`<button class="add-tel-btn" data-action="agregar-tel" data-idx="${idx}">+ Agregar teléfono</button>`);
     }
     if (it.tipo !== 'bloqueo') {
+      if (!it.fichaId) botones.push(`<button class="add-tel-btn" data-action="asignar-ficha" data-idx="${idx}">Asignar ficha</button>`);
       botones.push(`<button class="icon-btn" data-action="mover" data-idx="${idx}" title="Editar turno">✏️</button>`);
       botones.push(`<button class="icon-btn" data-action="imprimir" data-idx="${idx}" title="Imprimir ticket">${PRINTER_ICON}</button>`);
       botones.push(`<button class="icon-btn trash" data-action="cancelar" data-idx="${idx}" title="Cancelar">${TRASH_ICON}</button>`);
@@ -1801,6 +1844,8 @@
       abrirTicketPreview(item);
     } else if (action === 'datos') {
       abrirDatosPaciente(item);
+    } else if (action === 'asignar-ficha') {
+      abrirAsignarFicha(idx);
     } else if (action === 'cancelar') {
       cancelarItem(item);
     } else if (action === 'agregar-tel' || action === 'editar-tel') {
@@ -2569,6 +2614,138 @@
     datosOverlay.classList.remove('hidden');
     requestAnimationFrame(() => datosOverlay.classList.add('show'));
   }
+
+
+  // ---------- Asignar ficha / crear ficha nueva (turnos sin ficha) ----------
+  // Para quien tiene turno pero todavía no tiene ficha: buscar una existente y asignarla,
+  // o crear una nueva (el servidor frena si el DNI ya tiene ficha: api/gestion/pacientes.js
+  // accion 'crear'). Nunca se asigna ni se crea nada sin que Ayelen toque el botón.
+  const afOverlay = document.getElementById('af-overlay');
+  let afIdx = -1, afFichas = null, afSel = '', afModo = 'buscar', afOcupado = false;
+  const afEl = (id) => document.getElementById(id);
+  const afNorm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  function afMsg(texto, error) { const m = afEl('af-msg'); m.textContent = texto || ''; m.classList.toggle('error', !!error); }
+  function afVista(modo) {
+    afModo = modo;
+    afEl('af-vista-buscar').classList.toggle('hidden', modo !== 'buscar');
+    afEl('af-vista-crear').classList.toggle('hidden', modo !== 'crear');
+    afEl('af-titulo').textContent = modo === 'crear' ? 'Crear ficha nueva' : 'Asignar ficha';
+    const b = afEl('af-confirmar');
+    b.textContent = modo === 'crear' ? 'Crear ficha' : 'Asignar ficha';
+    b.disabled = modo === 'buscar' && !afSel;
+    afMsg('');
+  }
+  function afPintar() {
+    const q = afNorm(afEl('af-buscar').value.trim());
+    const lista = afEl('af-lista');
+    if (!afFichas) { lista.innerHTML = '<div class="af-msg">Cargando fichas…</div>'; return; }
+    const palabras = q.split(/\s+/).filter(Boolean);
+    const f = (q ? afFichas.filter((x) => { const t = afNorm(`${x.nombre} ${x.apellido} ${x.dni}`); return palabras.every((w) => t.includes(w)); }) : afFichas).slice(0, 40);
+    lista.innerHTML = f.map((x) => `<button type="button" class="af-item${x.id === afSel ? ' sel' : ''}" data-af-id="${escapeHtml(x.id)}">${escapeHtml(`${x.nombre} ${x.apellido}`.trim())}<small>${x.dni ? 'DNI ' + escapeHtml(x.dni) : 'Sin DNI'}</small></button>`).join('')
+      || '<div class="af-msg">No hay fichas con ese nombre o DNI.</div>';
+  }
+  function abrirAsignarFicha(idx) {
+    const item = agendaItems[idx];
+    afIdx = idx; afSel = ''; afOcupado = false;
+    afEl('af-buscar').value = item.title || '';
+    const partes = String(item.title || '').trim().split(/\s+/);
+    const apellido = partes.length > 1 ? partes[partes.length - 1] : '';
+    afEl('af-nombre').value = partes.length > 1 ? partes.slice(0, -1).join(' ') : (partes[0] || '');
+    afEl('af-apellido').value = apellido;
+    afEl('af-dni').value = item.dni || '';
+    afEl('af-tel').value = item.telefono || '';
+    ['af-fnac', 'af-os', 'af-afiliado', 'af-plan', 'af-dom', 'af-loc'].forEach((id) => { afEl(id).value = ''; });
+    afVista('buscar');
+    afOverlay.classList.remove('hidden');
+    requestAnimationFrame(() => afOverlay.classList.add('show'));
+    afPintar();
+    if (!afFichas) {
+      fetch(`/api/gestion/pacientes?modo=listar&key=${encodeURIComponent(gestionKey)}`)
+        .then((r) => { if (r.status === 401) { onUnauthorized(); throw new Error('unauthorized'); } return r.json(); })
+        .then((d) => { afFichas = Array.isArray(d) ? d : []; afPintar(); })
+        .catch(() => { afMsg('No se pudieron cargar las fichas. Cerrá y volvé a abrir.', true); });
+    }
+  }
+  function afCerrar() {
+    afOverlay.classList.remove('show');
+    setTimeout(() => afOverlay.classList.add('hidden'), 180);
+  }
+  function afAplicarLocal(fichaId) {
+    const base = agendaItems[afIdx];
+    const dni = (base.dni || '').replace(/\D/g, '');
+    agendaItems.forEach((it, i) => {
+      if (it.tipo === 'bloqueo' || it.fichaId) return;
+      const mismo = i === afIdx || (dni && (it.dni || '').replace(/\D/g, '') === dni);
+      if (mismo) it.fichaId = fichaId;
+    });
+    renderAgenda();
+  }
+  async function afPost(body) {
+    const r = await fetch('/api/gestion/pacientes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: gestionKey, ...body }) });
+    if (r.status === 401) { onUnauthorized(); throw new Error('unauthorized'); }
+    return r.json();
+  }
+  async function afAsignar(fichaId) {
+    const item = agendaItems[afIdx];
+    const r = await afPost({ accion: 'asignar-turno-a-ficha', fichaId, virtual: { nombre: item.title || '', dni: item.dni || '', telefono: item.telefono || '' } });
+    if (!r.success) throw new Error(r.message || 'No se pudo asignar la ficha.');
+    afAplicarLocal(fichaId);
+  }
+  afEl('af-lista').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-af-id]');
+    if (!b) return;
+    afSel = b.dataset.afId;
+    afEl('af-confirmar').disabled = false;
+    afPintar();
+  });
+  afEl('af-buscar').addEventListener('input', () => { afSel = ''; afEl('af-confirmar').disabled = true; afPintar(); });
+  afEl('af-ir-crear').addEventListener('click', () => afVista('crear'));
+  afEl('af-ir-buscar').addEventListener('click', () => afVista('buscar'));
+  afEl('af-cancelar').addEventListener('click', afCerrar);
+  afOverlay.addEventListener('click', (e) => { if (e.target === afOverlay) afCerrar(); });
+  afEl('af-confirmar').addEventListener('click', async () => {
+    if (afOcupado) return;
+    afOcupado = true;
+    const btn = afEl('af-confirmar');
+    btn.disabled = true;
+    try {
+      if (afModo === 'buscar') {
+        afMsg('Asignando…');
+        await afAsignar(afSel);
+        afCerrar();
+      } else {
+        const nombre = afEl('af-nombre').value.trim(), apellido = afEl('af-apellido').value.trim();
+        if (!nombre || !apellido) { afMsg('Nombre y apellido son obligatorios.', true); return; }
+        const campos = {
+          dni: afEl('af-dni').value.trim(), fechaNacimiento: afEl('af-fnac').value.trim(), telefono: afEl('af-tel').value.trim(),
+          obraSocial: afEl('af-os').value.trim(), nAfiliado: afEl('af-afiliado').value.trim(), plan: afEl('af-plan').value.trim(),
+          domicilio: afEl('af-dom').value.trim(), localidad: afEl('af-loc').value.trim(),
+        };
+        afMsg('Creando la ficha…');
+        const r = await afPost({ accion: 'crear', nombre, apellido, campos });
+        if (r.success) {
+          if (afFichas) afFichas.push({ id: r.id, nombre, apellido, dni: campos.dni });
+          try { await afAsignar(r.id); } catch { afAplicarLocal(r.id); }
+          afCerrar();
+        } else if (r.duplicado) {
+          afSel = r.id; afFichas = null;
+          afVista('buscar');
+          afEl('af-buscar').value = `${r.nombre || ''} ${r.apellido || ''}`.trim();
+          afFichas = [{ id: r.id, nombre: r.nombre || '', apellido: r.apellido || '', dni: campos.dni }];
+          afPintar();
+          afEl('af-confirmar').disabled = false;
+          afMsg('Ya existe una ficha con ese DNI. Tocá "Asignar ficha" para usarla.', true);
+        } else {
+          afMsg(r.message || 'No se pudo crear la ficha.', true);
+        }
+      }
+    } catch (e) {
+      if (e.message !== 'unauthorized') afMsg(e.message || 'Error de red. Probá de nuevo.', true);
+    } finally {
+      afOcupado = false;
+      if (afModo === 'crear' || afSel) btn.disabled = false;
+    }
+  });
 
   // ---------- Ticket térmico (impresora 58mm) ----------
   // Previsualización propia primero; recién si tocan "Imprimir" ahí adentro se llama

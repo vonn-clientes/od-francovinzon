@@ -6,6 +6,8 @@ import {
   extraerConfirmacionSolicitada, extraerCodigoCorto, asegurarCodigoCorto, extraerDni, extraerEmail,
 } from '../lib/googleCalendar.js';
 import { avisarFallo } from '../lib/alertas.js';
+import { rpcAdmin } from '../lib/adminSupabase.js';
+import { firmarToken, secretoAutoficha } from '../lib/autoficha.js';
 import { conReintentos } from '../lib/retry.js';
 import { obtenerHorariosConfig, logActividad } from '../lib/adminConfig.js';
 import { espejarTurnosBestEffort } from '../lib/espejoTurnos.js';
@@ -177,9 +179,7 @@ async function resolverCodigoCorto(req, res) {
       const esRobot = req.method === 'HEAD' || /bot|crawl|spider|preview|whatsapp|facebookexternalhit|slack|telegram|embedly|curl|wget|python|node-fetch/i.test(ua);
       const { start } = eventBounds(match.ev);
       const detalle = `${match.ev.summary || 'tu turno'} — ${formatArgDay(start)} a las ${formatArgTime(start)}hs`;
-      const volver = new URLSearchParams({ eventId: match.ev.id });
-      if (match.calendarId === SOBRETURNOS_CALENDAR_ID) { volver.set('calendarId', match.calendarId); volver.set('tipo', 'sobreturno'); }
-      if (esRobot) return paginaConfirmacion(res, { confirmado: false, detalle, volver: volver.toString() });
+      if (esRobot) return paginaConfirmacion(res, { confirmado: false, detalle });
       if (!extraerConfirmado(match.ev.description)) {
         await conReintentos(() => calendar.events.patch({
           calendarId: match.calendarId, eventId: match.ev.id,
@@ -188,7 +188,17 @@ async function resolverCodigoCorto(req, res) {
         await logActividad({ tipo: 'turno_confirmado', detalle: `${match.ev.summary || 'paciente'} — ${formatArgDay(start)} ${formatArgTime(start)}hs`, actor: 'paciente (link)' });
         await espejarTurnosBestEffort();
       }
-      return paginaConfirmacion(res, { confirmado: true, detalle, volver: volver.toString() });
+      // Botón "Revisar mis datos": lleva al mismo formulario del QR, con un acceso de 1 hora a
+      // SU ficha. Solo si se la identifica sin dudas (DNI; o teléfono único si no hay DNI).
+      let datos = '';
+      try {
+        const desc = match.ev.description || '';
+        const fichaId = await rpcAdmin('consultorio_ficha_por_identidad', { p_dni: extraerDni(desc) || '', p_telefono: extraerTelefono(desc) || '' });
+        if (typeof fichaId === 'string' && fichaId && process.env.GESTION_KEY) {
+          datos = `/mis-datos/?t=${firmarToken({ fichaId, ttlMs: 3600 * 1000, secreto: secretoAutoficha(process.env.GESTION_KEY) })}`;
+        }
+      } catch { /* sin botón de datos, el turno igual quedó confirmado */ }
+      return paginaConfirmacion(res, { confirmado: true, detalle, datos });
     }
 
     const params = new URLSearchParams({ eventId: match.ev.id });
@@ -205,7 +215,7 @@ async function resolverCodigoCorto(req, res) {
 }
 
 function escaparHtml(t) { return String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function paginaConfirmacion(res, { confirmado, detalle, volver }) {
+function paginaConfirmacion(res, { confirmado, detalle, datos }) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.status(200).send(`<!doctype html>
@@ -218,14 +228,15 @@ function paginaConfirmacion(res, { confirmado, detalle, volver }) {
   .ok { font-size: 44px; margin-bottom: 6px; }
   h1 { font-size: 20px; color: #1E3A5F; margin: 0 0 10px; font-family: Georgia, serif; }
   p { font-size: 14.5px; line-height: 1.5; color: #6B6656; margin: 0 0 16px; }
-  a.sec { display: inline-block; color: #1E3A5F; font-weight: 600; font-size: 13.5px; text-decoration: underline; }
+  a.btn { display: inline-block; background: #1E3A5F; color: #fff; font-weight: 600; font-size: 14px; text-decoration: none; padding: 12px 22px; border-radius: 12px; }
 </style></head>
 <body><div class="box">
   <div class="ok">${confirmado ? '✅' : '🦷'}</div>
   <h1>${confirmado ? '¡Turno confirmado!' : 'Franco Vinzón Odontólogo'}</h1>
   <p>${escaparHtml(detalle)}</p>
   <p>${confirmado ? 'Gracias por avisarnos. ¡Te esperamos!' : 'Abrí este link desde tu celular para confirmar el turno.'}</p>
-  <a class="sec" href="/turno?${escaparHtml(volver)}">Ver, mover o cancelar mi turno</a>
+  ${confirmado && datos ? `<p style="margin-bottom:10px">¿Querés corroborar que tus datos estén bien?</p><a class="btn" href="${escaparHtml(datos)}">Revisar mis datos</a>` : ''}
+  ${confirmado ? '<p style="margin:18px 0 0;font-size:12.5px">Si necesitás cancelar o cambiar el turno, escribile a la secretaria.</p>' : ''}
 </div></body></html>`);
 }
 

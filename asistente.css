@@ -170,3 +170,15 @@ html:has(.asis-solo), .asis-solo { overscroll-behavior: none; }
 .asis-foot:focus-within { border: 0; box-shadow: none; background: #ececf1; }
 .asis-note { font-size: .66rem; padding-top: 4px; }
 @media (min-width: 641px) { html:has(.asis-solo), .asis-solo { background: #eef0f4 !important; } .asis-solo .asis-panel { box-shadow: 0 12px 40px rgba(20,35,60,.15); } }
+
+/* ---- En el sitio: pop-up grande por encima de todo (el menú del sitio ya no lo tapa) ---- */
+.asis-panel { z-index: 2000; }
+.asis-btn { z-index: 1500; }
+.asis-fondo { position: fixed; inset: 0; z-index: 1999; background: rgba(15,25,45,.45); display: none; }
+.asis-fondo.open { display: block; }
+@media (max-width: 640px) {
+  body:not(.asis-solo) .asis-panel { left: 10px; right: 10px; width: auto; border-radius: 22px; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+  body:not(.asis-solo) .asis-head { padding-top: 10px; }
+  
+}
+@media (min-width: 641px) { .asis-panel { width: min(420px, calc(100vw - 40px)); height: min(680px, calc(100dvh - 40px)); } .asis-solo .asis-panel { width: min(560px, 100%); height: calc(100dvh - 48px); } }

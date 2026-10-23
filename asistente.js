@@ -107,4 +107,6 @@
   foot.onsubmit = (e) => { e.preventDefault(); const t = input.value; input.value = ''; preguntar(t); };
 
   document.body.append(btn, panel);
+  // Link directo: cualquier página con ?lucia=1 abre el chat de Lucía apenas carga.
+  try { if (new URLSearchParams(location.search).get('lucia') === '1') abrir(); } catch (e) {}
 })();

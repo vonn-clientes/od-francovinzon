@@ -69,6 +69,12 @@
     if (rol !== 'user' && quiere) m.append(el('br'), botonWA(urg));
     const hh = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
     m.append(el('span', 'asis-t', hh));
+    // Cola de la burbuja solo en la última de cada tramo del mismo lado (como Mensajes)
+    const lado = rol === 'user' ? 'asis-user' : 'asis-bot';
+    m.classList.add('asis-cola');
+    const previo = body.lastElementChild;
+    if (previo && previo.classList.contains(lado)) previo.classList.remove('asis-cola');
+    if (!body.querySelector('.asis-dia')) body.insertBefore(el('div', 'asis-dia', 'Hoy ' + hh), body.firstChild);
     body.append(m); bajar(); return m;
   }
 

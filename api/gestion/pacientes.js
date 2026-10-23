@@ -32,6 +32,8 @@ import { isValidAdminKey } from '../../lib/adminAuth.js';
 import { formatearDniConPuntos } from '../../lib/dni.js';
 import { Readable } from 'node:stream';
 import crypto from 'node:crypto';
+import { logActividad } from '../../lib/adminConfig.js';
+import { buscarPacienteConsolidadoPorTelefono, buscarPacienteConsolidadoPorDni } from '../../lib/pacientesConsolidados.js';
 import { upsertPacienteConsolidado, actualizarPacienteConsolidado, listarPacientesConsolidados, asignarFilaAFicha, PACIENTES_CONSOLIDADOS_NAME } from '../../lib/pacientesConsolidados.js';
 // Confirmación automática de turnos por movimientos (pedido 2026-08-25, ver
 // lib/confirmarTurnosPorMovimiento.js): al guardar/editar un movimiento con fecha, si ese
@@ -48,6 +50,7 @@ import { parsearImporteAR } from '../../lib/cuentaSaldo.js';
 import { crearClienteSupabase, construirPayload, sincronizarFichas, filtrarArchivosModificados, conTimeout } from '../../lib/sincronizarSupabase.js';
 import { sincronizarTurnosVentana, espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { copiarArchivosLote, listarArchivosDrive } from '../../lib/espejoArchivos.js';
+import { firmarToken, verificarToken, secretoAutoficha, CAMPOS_AUTOFICHA, vistaPublica, validarCambios } from '../../lib/autoficha.js';
 import { ACCIONES_SOMBRA, leerAntesSombra, registrarSombra } from '../../lib/sombraEscrituras.js';
 import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
 import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
@@ -125,6 +128,11 @@ export default async function handler(req, res) {
     // nunca devuelve más que nombre/apellido/dni (nada financiero ni de contacto), y
     // fotos/foto-imagen solo sirven lo que ya se subió como foto de paciente — mismo
     // nivel de exposición que decidió aceptar el usuario para esa página entera.
+    // "Mis datos" (QR del paciente): público pero con token firmado que vale 3 h y abre
+    // UNA sola ficha; solo expone/escribe los datos personales de lib/autoficha.js.
+    if (req.method === 'GET' && req.query.modo === 'autoficha') return await autofichaLeer(req, res);
+    if (req.method === 'POST' && req.body?.accion === 'autoficha-guardar') return await autofichaGuardar(req, res);
+    if (req.method === 'POST' && req.body?.accion === 'autoficha-token') return await autofichaToken(req, res);
     if (req.method === 'GET' && req.query.modo === 'buscar-publico') {
       return await buscarPublico(req, res);
     }
@@ -719,6 +727,83 @@ async function sincronizarSupabaseModo(req, res) {
   } catch {
     // No registrar ni devolver datos de fichas ni credenciales ante un error global.
     return res.status(500).json({ error: 'No se pudo procesar la sincronización.' });
+  }
+}
+
+// ---------- "Mis datos" (autoficha por QR) ----------
+const AUTOFICHA_ORDEN = ['nombre', 'apellido', 'dni', 'fechaNacimiento', 'domicilio', 'localidad', 'obraSocial', 'nAfiliado', 'plan', 'telefono'];
+async function leerCamposAutoficha(fichaId) {
+  const sheets = getPacientesSheetsClient();
+  const { data } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: fichaId, range: `${SHEET_NAME}!C5:C15` }));
+  const c = (data.values || []).map((r) => (r[0] != null ? String(r[0]) : ''));
+  while (c.length < 11) c.push('');
+  const [nombre, apellido, dni, fechaNacimiento, domicilio, localidad, obraSocial, nAfiliado, plan, telefono] = c;
+  return { nombre, apellido, dni, fechaNacimiento, domicilio, localidad, obraSocial, nAfiliado, plan, telefono };
+}
+function verificarTokenAutoficha(token) {
+  return verificarToken(token, { secreto: secretoAutoficha(process.env.GESTION_KEY) });
+}
+function respuestaTokenMalo(res, v) {
+  return res.status(v.motivo === 'expirado' ? 410 : 401).json({ ok: false, motivo: v.motivo });
+}
+async function autofichaLeer(req, res) {
+  res.setHeader('Cache-Control', 'no-store, private');
+  const v = verificarTokenAutoficha(String(req.query.t || ''));
+  if (!v.ok) return respuestaTokenMalo(res, v);
+  try {
+    const actuales = vistaPublica({ campos: await leerCamposAutoficha(v.fichaId) });
+    const campos = CAMPOS_AUTOFICHA.map((c) => {
+      const valor = actuales[c.clave] ?? '';
+      return { clave: c.clave, etiqueta: c.etiqueta, tipo: c.tipo, autocomplete: c.autocomplete, valor, bloqueado: !!c.soloLecturaConValor && String(valor).trim() !== '' };
+    });
+    const nombre = String(actuales.nombre || '').trim();
+    return res.status(200).json({ ok: true, campos, ...(nombre ? { saludo: `Hola, ${nombre}` } : {}) });
+  } catch (error) {
+    console.error('[autoficha] lectura falló');
+    return res.status(500).json({ ok: false, error: 'No se pudieron cargar tus datos. Probá de nuevo en un momento.' });
+  }
+}
+async function autofichaGuardar(req, res) {
+  res.setHeader('Cache-Control', 'no-store, private');
+  const v = verificarTokenAutoficha(String(req.body?.t || ''));
+  if (!v.ok) return respuestaTokenMalo(res, v);
+  try {
+    const actuales = await leerCamposAutoficha(v.fichaId);
+    const { cambios, errores } = validarCambios(req.body?.cambios, actuales);
+    // Que el teléfono o el DNI nuevos no pertenezcan a OTRA ficha (evita pisar identidades).
+    for (const { campo, valor } of cambios) {
+      if (campo !== 'telefono' && campo !== 'dni') continue;
+      const otra = campo === 'telefono'
+        ? await buscarPacienteConsolidadoPorTelefono(valor, { cache: true }).catch(() => null)
+        : await buscarPacienteConsolidadoPorDni(valor, { cache: true }).catch(() => null);
+      if (otra && otra.fichaId && otra.fichaId !== v.fichaId) errores[campo] = 'Ese dato ya figura en otra ficha. Avisale a la secretaria.';
+    }
+    if (Object.keys(errores).length) return res.status(400).json({ ok: false, errores });
+    if (!cambios.length) return res.status(200).json({ ok: true, guardados: [] });
+    for (const { campo, valor } of cambios) await escribirCampoEnSheet(v.fichaId, campo, valor);
+    await espejarFichaBestEffort(v.fichaId);
+    logActividad({ tipo: 'autoficha', detalle: `Paciente completó sus datos (${cambios.map((c) => c.campo).join(', ')})`, actor: 'paciente-qr' }).catch(() => {});
+    return res.status(200).json({ ok: true, guardados: cambios.map((c) => c.campo) });
+  } catch (error) {
+    console.error('[autoficha] guardado falló');
+    return res.status(500).json({ ok: false, error: 'No se pudieron guardar los datos.' });
+  }
+}
+async function autofichaToken(req, res) {
+  if (!claveValida(req.body?.key)) return res.status(401).json({ error: 'unauthorized' });
+  const fichaId = String(req.body?.fichaId || '');
+  if (!/^[A-Za-z0-9_-]{20,80}$/.test(fichaId)) return res.status(400).json({ error: 'Ficha inválida.' });
+  try {
+    const drive = getPacientesDriveClient();
+    const { data } = await conReintentos(() => drive.files.get({ fileId: fichaId, fields: 'id,parents,trashed' }));
+    if (data.trashed || !(data.parents || []).includes(PACIENTES_FOLDER_ID)) return res.status(404).json({ error: 'Ficha no encontrada.' });
+    const token = firmarToken({ fichaId, secreto: secretoAutoficha(process.env.GESTION_KEY) });
+    const host = String(req.headers.host || '');
+    const base = /^od-francovinzon[a-z0-9-]*\.vercel\.app$/.test(host) ? `https://${host}` : 'https://od-francovinzon.vercel.app';
+    res.setHeader('Cache-Control', 'no-store, private');
+    return res.status(200).json({ url: `${base}/mis-datos/?t=${token}` });
+  } catch (error) {
+    return res.status(500).json({ error: 'No se pudo generar el QR.' });
   }
 }
 

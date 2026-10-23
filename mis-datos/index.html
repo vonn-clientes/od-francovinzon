@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Mis datos · Odontólogo Franco Vinzón</title>
+  <link rel="icon" href="../assets/isologo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--navy:#1E3A5F;--gold:#D4A24C;--cream:#FAF9F6;--line:#E9E4D8;--text:#2A2A2A;--muted:#625f57;--red:#a52d25;--green:#276d36}
+    *{box-sizing:border-box}body{margin:0;background:var(--cream);color:var(--text);font:18px/1.55 Inter,-apple-system,"Segoe UI",sans-serif}
+    main{width:min(100% - 28px,640px);margin:0 auto;padding:28px 0 56px}.card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 8px 28px #1e3a5f0c}
+    .brand{display:block;width:min(240px,70%);height:auto;margin:0 auto 24px}h1,h2{font-family:Fraunces,Georgia,serif;color:var(--navy);line-height:1.2}h1{font-size:clamp(30px,8vw,40px);text-align:center;margin:0 0 10px}h2{font-size:30px;margin:0 0 12px}p{margin:0 0 18px}.intro{text-align:center;color:var(--muted);font-size:17px}
+    .field{margin:0 0 18px}.field label{display:block;font-weight:700;margin-bottom:7px;color:var(--navy)}input{width:100%;min-height:56px;padding:12px 14px;border:2px solid #c9c3b5;border-radius:12px;background:#fff;color:var(--text);font:inherit;font-size:18px}input:focus{outline:3px solid #d4a24c66;border-color:#9a6c1e}input:disabled{background:#f1f0ed;color:#45433e;border-color:#ddd8ce;opacity:1}.locked{font-size:15px;color:var(--muted);margin:6px 0 0}
+    button{font:700 18px Inter,sans-serif;min-height:58px;border:0;border-radius:13px;padding:14px 20px;background:var(--navy);color:white;cursor:pointer;width:100%;margin-top:8px}button:hover{background:#294d78}button:focus-visible{outline:4px solid var(--gold);outline-offset:3px}button:disabled{opacity:.65;cursor:wait}.retry{background:white;color:var(--navy);border:2px solid var(--navy)}.notice{padding:15px;border-radius:12px;background:#f7f4ec;color:var(--text)}.error{color:var(--red);font-size:16px;font-weight:600;margin:6px 0 14px}.status{text-align:center;padding:30px 4px}.status p{font-size:18px;color:var(--muted)}[hidden]{display:none!important}
+    @media(min-width:560px){main{padding-top:48px}.card{padding:36px}.brand{margin-bottom:32px}}
+  </style>
+</head>
+<body>
+  <main>
+    <img class="brand" src="../assets/logo-horizontal.png" alt="Consultorio Odontológico Franco Vinzón">
+    <section id="loading" class="card status" aria-live="polite"><h1>Cargando tus datos</h1><p>Un momento, por favor.</p></section>
+    <section id="expired" class="card status" hidden><h1>Este enlace venció</h1><p>Pedile a la secretaria que te muestre el QR de nuevo.</p></section>
+    <section id="network" class="card status" hidden><h1>No pudimos conectar</h1><p>Revisá tu conexión e intentá otra vez.</p><button id="retry" class="retry" type="button">Reintentar</button></section>
+    <section id="form-card" class="card" hidden>
+      <h1>Mis datos</h1><p id="greeting" class="intro">Revisá tus datos y completá lo que falte.</p>
+      <form id="form" novalidate><div id="fields"></div><div id="form-error" class="error" role="alert" aria-live="polite"></div><button id="save" type="submit">Guardar mis datos</button></form>
+    </section>
+    <section id="done" class="card status" hidden><h1>¡Listo, gracias!</h1><p>Tus datos fueron guardados.</p></section>
+  </main>
+  <script>
+    (() => {
+      const token = new URLSearchParams(location.search).get('t') || '';
+      const estados = ['loading','expired','network','form-card','done'];
+      const mostrar = (id) => estados.forEach((e) => { document.getElementById(e).hidden = e !== id; });
+      const inputFor = (campo) => {
+        const wrap = document.createElement('div'); wrap.className = 'field';
+        const label = document.createElement('label'); const id = `campo-${campo.clave}`; label.htmlFor = id; label.textContent = campo.etiqueta;
+        const input = document.createElement('input'); input.id = id; input.name = campo.clave; input.type = campo.tipo === 'tel' ? 'tel' : 'text'; input.autocomplete = campo.autocomplete || 'off'; input.maxLength = 120;
+        if (campo.clave === 'telefono') input.inputMode = 'tel';
+        if (campo.clave === 'dni') input.inputMode = 'numeric';
+        if (campo.clave === 'fechaNacimiento') { input.placeholder = 'dd/mm/aaaa'; input.inputMode = 'numeric'; input.addEventListener('input', () => { const d = input.value.replace(/\D/g,'').slice(0,8); input.value = d.length > 4 ? `${d.slice(0,2)}/${d.slice(2,4)}/${d.slice(4)}` : d.length > 2 ? `${d.slice(0,2)}/${d.slice(2)}` : d; }); }
+        input.value = campo.valor ?? ''; input.dataset.original = input.value;
+        if (campo.bloqueado) { input.disabled = true; const note = document.createElement('p'); note.className = 'locked'; note.textContent = 'Si hay un error, avisale a la secretaria'; wrap.append(label,input,note); }
+        else wrap.append(label,input);
+        return wrap;
+      };
+      async function cargar() {
+        mostrar('loading');
+        try {
+          const r = await fetch(`/api/gestion/pacientes?modo=autoficha&t=${encodeURIComponent(token)}`, { headers:{Accept:'application/json'}, cache:'no-store' });
+          const data = await r.json().catch(() => ({}));
+          if (r.status === 410 || data.motivo === 'expirado' || data.error === 'expirado') { mostrar('expired'); return; }
+          if (!r.ok || !data.ok || !Array.isArray(data.campos)) throw new Error('respuesta');
+          document.getElementById('greeting').textContent = data.saludo || 'Revisá tus datos y completá lo que falte.';
+          const fields = document.getElementById('fields'); fields.replaceChildren(...data.campos.map(inputFor)); mostrar('form-card');
+        } catch { mostrar('network'); }
+      }
+      document.getElementById('retry').addEventListener('click', cargar);
+      document.getElementById('form').addEventListener('submit', async (event) => {
+        event.preventDefault(); const button = document.getElementById('save'), error = document.getElementById('form-error'); error.textContent = '';
+        const cambios = {}; document.querySelectorAll('#fields input:not(:disabled)').forEach((input) => { if (input.value.trim() !== input.dataset.original.trim()) cambios[input.name] = input.value; });
+        button.disabled = true; button.textContent = 'Guardando…';
+        try {
+          const r = await fetch('/api/gestion/pacientes', { method:'POST', headers:{'Content-Type':'application/json',Accept:'application/json'}, body:JSON.stringify({accion:'autoficha-guardar',t:token,cambios}) });
+          const data = await r.json().catch(() => ({}));
+          if (r.status === 410 || data.motivo === 'expirado') { mostrar('expired'); return; }
+          document.querySelectorAll('#fields p.error').forEach((n) => n.remove());
+          if (data.errores && Object.keys(data.errores).length) {
+            for (const [clave,msg] of Object.entries(data.errores)) {
+              const input = document.querySelector(`[name="${CSS.escape(clave)}"]`);
+              if (input) { const note = document.createElement('p'); note.id = `error-${clave}`; note.className = 'error'; note.textContent = msg; input.setAttribute('aria-describedby', note.id); input.after(note); }
+            }
+            error.textContent = 'Revisá los campos marcados.'; return;
+          }
+          if (!r.ok) throw new Error('No se pudieron guardar los datos. Intentá de nuevo.');
+          mostrar('done');
+        } catch (e) { error.textContent = e.message || 'No pudimos conectar. Intentá de nuevo.'; }
+        finally { button.disabled = false; button.textContent = 'Guardar mis datos'; }
+      });
+      if (!token) mostrar('expired'); else cargar();
+    })();
+  </script>
+</body>
+</html>

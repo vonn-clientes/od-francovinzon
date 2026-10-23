@@ -18,7 +18,7 @@ import {
 import { avisarFallo } from '../../lib/alertas.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { conReintentos } from '../../lib/retry.js';
-import { debeUsarSupabaseAdmin, escanearFichasDesdeSupabase } from '../../lib/adminSupabase.js';
+import { debeUsarSupabaseAdmin, escanearFichasDesdeSupabase, rpcAdmin } from '../../lib/adminSupabase.js';
 import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
   leerActividadReciente, leerAlertasRecientes, leerConfigVariasRapido,
@@ -634,7 +634,29 @@ const DIAS_FUTURO_FIJO = 60;
 // funciones serverless en el plan Hobby y el dashboard quedaba colgado sin ningún
 // error visible (encontrado en producción, 2026-08-13). `maxDuration: 60` en
 // vercel.json para este archivo da margen extra además de la paralelización.
+// Turnos/bloqueos desde el espejo de Supabase (RPC consultorio_admin_turnos). Devuelve
+// null si el flag está apagado o falla, y el llamador cae a Google Calendar.
+async function turnosDesdeSupabase(desde, hasta) {
+  if (!debeUsarSupabaseAdmin()) return null;
+  const r = await rpcAdmin('consultorio_admin_turnos', { p_desde: desde.toISOString(), p_hasta: hasta.toISOString() });
+  if (!r || !Array.isArray(r.turnos)) return null;
+  return { turnos: r.turnos, bloqueos: Array.isArray(r.bloqueos) ? r.bloqueos : [] };
+}
+
 async function calcularTurnos(desde, hasta) {
+  const sb = await turnosDesdeSupabase(desde, hasta);
+  if (sb) {
+    const porDia = {};
+    let online = 0, cargadoAyelen = 0, confirmados = 0, nuevos = 0, recurrentes = 0;
+    sb.turnos.forEach((t) => {
+      const dia = formatArgDay(new Date(t.inicio));
+      porDia[dia] = (porDia[dia] || 0) + 1;
+      if (t.manual) cargadoAyelen++; else online++;
+      if (t.confirmado) confirmados++;
+      if (t.nuevo) nuevos++; else recurrentes++;
+    });
+    return { eventos: sb.turnos, porDia, online, cargadoAyelen, confirmados, nuevos, recurrentes, total: sb.turnos.length || 1 };
+  }
   const calendar = getCalendarClient();
   const [principal, sobreturnos] = await Promise.all([
     conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, timeMin: desde.toISOString(), timeMax: hasta.toISOString(), singleEvents: true, maxResults: 2500 })),
@@ -873,15 +895,26 @@ async function calcularOcupacionMes(calendar, year, month, schedule, slotMinutes
   const lastDayStr = `${year}-${pad2(month)}-${pad2(daysInMonth)}`;
   const monthEnd = new Date(toArgDate(lastDayStr, '00:00').getTime() + 24 * 60 * 60000);
 
-  const [principal, sobreturnos] = await Promise.all([
-    conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, timeMin: monthStart.toISOString(), timeMax: monthEnd.toISOString(), singleEvents: true, maxResults: 2500 })),
-    conReintentos(() => calendar.events.list({ calendarId: SOBRETURNOS_CALENDAR_ID, timeMin: monthStart.toISOString(), timeMax: monthEnd.toISOString(), singleEvents: true, maxResults: 2500 })),
-  ]);
-
-  const eventosPrincipal = principal.data.items || [];
-  const bloqueos = eventosPrincipal.filter((ev) => (ev.description || '').includes(BLOCK_MARKER));
-  const turnosReservados = eventosPrincipal.length - bloqueos.length;
-  const sobreturnosReservados = (sobreturnos.data.items || []).length;
+  let turnosReservados, sobreturnosReservados, minutosBloqueados;
+  const sb = await turnosDesdeSupabase(monthStart, monthEnd);
+  if (sb) {
+    turnosReservados = sb.turnos.filter((t) => t.tipo !== 'sobreturno').length;
+    sobreturnosReservados = sb.turnos.filter((t) => t.tipo === 'sobreturno').length;
+    minutosBloqueados = sb.bloqueos.reduce((acc, b) => acc + (new Date(b.fin) - new Date(b.inicio)) / 60000, 0);
+  } else {
+    const [principal, sobreturnos] = await Promise.all([
+      conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, timeMin: monthStart.toISOString(), timeMax: monthEnd.toISOString(), singleEvents: true, maxResults: 2500 })),
+      conReintentos(() => calendar.events.list({ calendarId: SOBRETURNOS_CALENDAR_ID, timeMin: monthStart.toISOString(), timeMax: monthEnd.toISOString(), singleEvents: true, maxResults: 2500 })),
+    ]);
+    const eventosPrincipal = principal.data.items || [];
+    const bloqueos = eventosPrincipal.filter((ev) => (ev.description || '').includes(BLOCK_MARKER));
+    turnosReservados = eventosPrincipal.length - bloqueos.length;
+    sobreturnosReservados = (sobreturnos.data.items || []).length;
+    minutosBloqueados = bloqueos.reduce((acc, ev) => {
+      const { start, end } = eventBounds(ev);
+      return acc + (end - start) / 60000;
+    }, 0);
+  }
 
   let capacidad = 0;
   for (let d = 1; d <= daysInMonth; d++) {
@@ -893,10 +926,6 @@ async function calcularOcupacionMes(calendar, year, month, schedule, slotMinutes
       capacidad += Math.floor(mins / slotMinutes);
     });
   }
-  const minutosBloqueados = bloqueos.reduce((acc, ev) => {
-    const { start, end } = eventBounds(ev);
-    return acc + (end - start) / 60000;
-  }, 0);
   capacidad = Math.max(0, capacidad - Math.round(minutosBloqueados / slotMinutes));
 
   return {
@@ -919,6 +948,21 @@ async function calcularInasistenciaMensual(calendar) {
   const desde = toArgDate(INASISTENCIA_DESDE, '00:00');
   const ahora = new Date();
   if (ahora <= desde) return [];
+
+  const sb = await turnosDesdeSupabase(desde, ahora);
+  if (sb) {
+    const porMesSb = {};
+    sb.turnos.forEach((t) => {
+      if (t.tipo === 'sobreturno') return;
+      const key = formatArgDay(new Date(t.inicio)).slice(0, 7);
+      (porMesSb[key] ||= { mes: key, total: 0, inasistencias: 0 });
+      porMesSb[key].total++;
+      if (!t.confirmado) porMesSb[key].inasistencias++;
+    });
+    return Object.values(porMesSb)
+      .sort((a, b) => a.mes.localeCompare(b.mes))
+      .map((m) => ({ ...m, porcentaje: m.total ? Math.round((m.inasistencias / m.total) * 100) : 0 }));
+  }
 
   let eventos = [];
   let pageToken;

@@ -32,7 +32,7 @@
   const cerrar = el('button', 'asis-close', '×'); cerrar.type = 'button'; cerrar.setAttribute('aria-label', 'Cerrar el asistente');
   head.append(avatar(), tit, cerrar);
   const body = el('div', 'asis-body'); body.setAttribute('aria-live', 'polite');
-  const nota = el('div', 'asis-note', 'Es un asistente virtual: no reemplaza una consulta. No compartas datos personales ni de salud por acá.');
+  const nota = el('div', 'asis-note', 'Asistente virtual: no reemplaza una consulta.');
   const foot = el('form', 'asis-foot');
   const input = el('input', 'asis-input'); input.type = 'text'; input.maxLength = 500; input.placeholder = 'Escribile a ' + NOMBRE + '…'; input.setAttribute('aria-label', 'Tu consulta'); input.autocomplete = 'off';
   const enviar = el('button', 'asis-send'); enviar.type = 'submit'; enviar.setAttribute('aria-label', 'Enviar');

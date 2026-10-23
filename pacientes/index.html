@@ -461,11 +461,13 @@
       </div>
       <div class="field-row">
         <div class="field"><label for="np-dni">DNI</label><input type="text" id="np-dni" inputmode="numeric"></div>
-        <div class="field"><label for="np-fnac">Fecha de nacimiento</label><input type="text" id="np-fnac" placeholder="dd/mm/aaaa"></div>
+        <div class="field"><label for="np-telefono">Teléfono</label><input type="text" id="np-telefono"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label for="np-telefono">Teléfono</label><input type="text" id="np-telefono"></div>
-        <div class="field"><label for="np-email">Correo electrónico</label><input type="email" id="np-email" autocomplete="off"></div>
+        <div class="field full"><label for="np-fnac">Fecha de nacimiento</label><input type="text" id="np-fnac" data-fecha-nac></div>
+      </div>
+      <div class="field-row">
+        <div class="field full"><label for="np-email">Correo electrónico</label><input type="email" id="np-email" autocomplete="off"></div>
       </div>
       <div class="field-row">
         <div class="field"><label for="np-domicilio">Domicilio</label><input type="text" id="np-domicilio"></div>
@@ -3507,5 +3509,6 @@ document.addEventListener('input', (ev) => {
 });
 </script>
 <script src="/assets/combo-localidad.js"></script>
+<script src="/assets/fecha-nacimiento.js"></script>
 </body>
 </html>

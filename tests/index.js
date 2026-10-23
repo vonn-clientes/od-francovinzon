@@ -6,3 +6,4 @@ import './sincronizarSupabase.test.js';
 import './sincronizarTurnos.test.js';
 import './espejoTurnosBestEffort.test.js';
 import './lecturasSupabase.test.js';
+import './adminSupabase.test.js';

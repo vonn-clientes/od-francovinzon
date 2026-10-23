@@ -18,9 +18,10 @@ import {
 import { avisarFallo } from '../../lib/alertas.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { conReintentos } from '../../lib/retry.js';
+import { debeUsarSupabaseAdmin, escanearFichasDesdeSupabase } from '../../lib/adminSupabase.js';
 import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
-  leerActividadReciente, leerAlertasRecientes,
+  leerActividadReciente, leerAlertasRecientes, leerConfigVariasRapido,
 } from '../../lib/adminConfig.js';
 import { listarPacientesConsolidados, upsertPacienteConsolidado, asignarFilaAFicha, asignarCoincidenciasExactas, sugerenciasPorNombre, candidatasParaFicha, desasignarFila } from '../../lib/pacientesConsolidados.js';
 import { normalizarTelefonoMapeo, normalizarDni } from '../../lib/pacientesSheet.js';
@@ -482,6 +483,19 @@ async function guardarSnapshot(nombre, data) {
 }
 
 async function leerSnapshot(nombre) {
+  // Rápido: el snapshot está espejado en Supabase (todos los tramos en una sola llamada).
+  const nRapido = await leerConfigVariasRapido([`snap-${nombre}-n`]);
+  if (nRapido && Number(nRapido[`snap-${nombre}-n`]) > 0) {
+    const cantidad = Number(nRapido[`snap-${nombre}-n`]);
+    const claves = Array.from({ length: cantidad }, (_, i) => `snap-${nombre}-${i}`);
+    const tramos = await leerConfigVariasRapido(claves);
+    if (tramos && claves.every((c) => typeof tramos[c] === 'string')) {
+      try {
+        const { generadoEn, data } = JSON.parse(zlib.gunzipSync(Buffer.from(claves.map((c) => tramos[c]).join(''), 'base64')).toString());
+        if (data) return { data, generadoEn };
+      } catch { /* snapshot ilegible en Supabase: se lee de Sheets */ }
+    }
+  }
   const n = await getConfig(`snap-${nombre}-n`, 0);
   if (!n) return null;
   let comprimido = '';
@@ -673,6 +687,12 @@ async function escanearFichasAdmin(forzar = false) {
   cacheFinanzas = null;
 
   const promesa = (async () => {
+    // Rápido: las fichas ya están copiadas en Supabase (se actualizan en cada edición y
+    // todas las noches). Si falla o viene vacío, se cae al camino viejo (leer Google).
+    if (debeUsarSupabaseAdmin()) {
+      try { return await escanearFichasDesdeSupabase(); }
+      catch (err) { console.warn('[admin.js] escaneo desde Supabase falló, uso Google:', err?.message || err); }
+    }
     const drive = getPacientesDriveClient();
     const sheets = getPacientesSheetsClient();
     let archivos = [];
@@ -1063,7 +1083,7 @@ async function calcularFinanzasPacientes(forzar) {
 async function calcularPacientesTotales() {
   let filas = [];
   try {
-    filas = await listarPacientesConsolidados();
+    filas = await listarPacientesConsolidados({ cache: true });
   } catch (err) {
     console.warn('[admin.js] no se pudo leer la planilla consolidada para pacientes totales:', err?.message || err);
     return { total: null, totalFichas: null, totalSoloTurno: null, fichas: [], soloTurno: [], error: err?.message || String(err) };

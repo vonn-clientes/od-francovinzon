@@ -384,6 +384,7 @@
   .af-box { max-width: 460px !important; width: 94vw; max-height: 88vh; overflow: auto; }
   .af-box input { width: 100%; padding: 10px 12px; border: 1.5px solid #d6dbe4; border-radius: 12px; font-size: 15px; font-family: inherit; color: var(--navy); background: #fff; margin: 0; }
   .af-box input:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(30,58,95,.12); }
+  .af-f.full { grid-column: 1 / -1; }
   .af-f { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; min-width: 0; }
   .af-f input { text-transform: none; letter-spacing: 0; font-weight: 500; }
   .af-sec { font-size: 12px; font-weight: 800; color: var(--navy); margin: 14px 0 8px; padding-bottom: 5px; border-bottom: 1px solid #e3e7ee; }
@@ -878,13 +879,13 @@
       <div class="af-grid">
         <label class="af-f">Nombre *<input type="text" id="af-nombre" autocomplete="off"></label>
         <label class="af-f">Apellido *<input type="text" id="af-apellido" autocomplete="off"></label>
+        <label class="af-f full">Fecha de nacimiento<input type="text" id="af-fnac" data-fecha-nac autocomplete="off"></label>
         <label class="af-f">DNI<input type="text" id="af-dni" inputmode="numeric" autocomplete="off"></label>
-        <label class="af-f">Fecha de nacimiento<input type="text" id="af-fnac" inputmode="numeric" placeholder="dd/mm/aaaa" autocomplete="off"></label>
-      </div>
-      <div class="af-sec">Contacto</div>
-      <div class="af-grid">
         <label class="af-f">Teléfono<input type="tel" id="af-tel" autocomplete="off"></label>
-        <label class="af-f">Correo electrónico<input type="email" id="af-email" autocomplete="off"></label>
+      </div>
+      <div class="af-sec">Contacto y domicilio</div>
+      <div class="af-grid">
+        <label class="af-f full">Correo electrónico<input type="email" id="af-email" autocomplete="off"></label>
         <label class="af-f full">Domicilio<input type="text" id="af-dom" autocomplete="off"></label>
         <label class="af-f full">Localidad<input type="text" id="af-loc" data-combo-localidad placeholder="Elegí una o escribí otra" autocomplete="off"></label>
       </div>
@@ -3644,6 +3645,7 @@
   window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
 </script>
 <script src="/assets/combo-localidad.js"></script>
+<script src="/assets/fecha-nacimiento.js"></script>
 <script defer src="/_vercel/insights/script.js"></script>
 <script>
   window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };

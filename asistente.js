@@ -107,7 +107,7 @@
   function abrir() {
     panel.classList.add('open'); btn.style.display = 'none';
     if (window.matchMedia('(max-width: 640px)').matches && !solo) document.body.classList.add('asis-bloqueado');
-    if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy Lucía, la asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); sugerencias(); }
+    if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy Lucía, la asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); }
     setTimeout(() => { if (!solo) input.focus(); ajustarTeclado(); }, 50);
     try { window.va && window.va('event', { name: 'asistente_abierto' }); } catch (e) {}
   }

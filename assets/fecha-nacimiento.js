@@ -41,7 +41,8 @@
       var d = dia.value, m = mes.value, a = anio.value, nuevo;
       if (!d && !m && !a) nuevo = '';
       else if (d && m && a) nuevo = d + '/' + m + '/' + a;
-      else { pintarVacios(); return; } // incompleta: no se toca el valor guardado
+      else { input.dataset.fnIncompleta = '1'; pintarVacios(); return; } // incompleta: no se toca el valor guardado
+      delete input.dataset.fnIncompleta;
       pintarVacios();
       if (input.value !== nuevo) { input.value = nuevo; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); }
     }

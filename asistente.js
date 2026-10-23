@@ -67,6 +67,8 @@
     }
     const m = el('div', 'asis-msg ' + (rol === 'user' ? 'asis-user' : 'asis-bot')); render(m, texto);
     if (rol !== 'user' && quiere) m.append(el('br'), botonWA(urg));
+    const hh = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
+    m.append(el('span', 'asis-t', hh));
     body.append(m); bajar(); return m;
   }
 
@@ -100,10 +102,22 @@
     panel.classList.add('open'); btn.style.display = 'none';
     if (window.matchMedia('(max-width: 640px)').matches && !solo) document.body.classList.add('asis-bloqueado');
     if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy Lucía, la asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); sugerencias(); }
-    setTimeout(() => input.focus(), 50);
+    setTimeout(() => { if (!solo) input.focus(); ajustarTeclado(); }, 50);
     try { window.va && window.va('event', { name: 'asistente_abierto' }); } catch (e) {}
   }
-  function cerrarPanel() { panel.classList.remove('open'); document.body.classList.remove('asis-bloqueado'); btn.style.display = ''; btn.focus(); }
+  // iPhone: al abrir el teclado el navegador no achica la página y el encabezado se "va" para arriba.
+  // Se ajusta el panel a la parte realmente visible para que Lucía quede siempre arriba.
+  const vv = window.visualViewport;
+  function ajustarTeclado() {
+    if (!vv || !panel.classList.contains('open') || !window.matchMedia('(max-width: 640px)').matches) return;
+    panel.style.height = vv.height + 'px';
+    panel.style.top = vv.offsetTop + 'px';
+    window.scrollTo(0, 0);
+    bajar();
+  }
+  if (vv) { vv.addEventListener('resize', ajustarTeclado); vv.addEventListener('scroll', ajustarTeclado); }
+  function cerrarPanel() {
+    panel.style.height = ''; panel.style.top = ''; panel.classList.remove('open'); document.body.classList.remove('asis-bloqueado'); btn.style.display = ''; btn.focus(); }
   btn.onclick = abrir; cerrar.onclick = cerrarPanel;
   panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarPanel(); });
   foot.onsubmit = (e) => { e.preventDefault(); const t = input.value; input.value = ''; preguntar(t); };

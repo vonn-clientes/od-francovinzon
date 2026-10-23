@@ -135,3 +135,4 @@ html:has(.asis-solo), .asis-solo { overscroll-behavior: none; }
 .asis-head small { display: block; font-size: .72rem; }
 .asis-volver { grid-column: 1; grid-row: 1; justify-self: start; align-self: center; margin: 0; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,.16); text-decoration: none; font-weight: 600; opacity: 1; }
 .asis-close { grid-column: 3; grid-row: 1; justify-self: end; align-self: center; margin: 0; }
+.asis-head .asis-avatar { width: 66px; height: 66px; } .asis-head .asis-avatar img { border: 2px solid rgba(255,255,255,.9); box-sizing: border-box; } .asis-head .asis-on { width: 14px; height: 14px; }

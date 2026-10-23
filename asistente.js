@@ -106,7 +106,7 @@
   }
 
   function abrir() {
-    panel.classList.add('open'); btn.style.display = 'none';
+    panel.classList.add('open'); btn.style.display = 'none'; if (!solo) fondo.classList.add('open');
     if (window.matchMedia('(max-width: 640px)').matches && !solo) document.body.classList.add('asis-bloqueado');
     if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy Lucía, la asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); }
     setTimeout(() => { if (!solo) input.focus(); ajustarTeclado(); }, 50);
@@ -117,19 +117,21 @@
   const vv = window.visualViewport;
   function ajustarTeclado() {
     if (!vv || !panel.classList.contains('open') || !window.matchMedia('(max-width: 640px)').matches) return;
-    panel.style.height = vv.height + 'px';
-    panel.style.top = vv.offsetTop + 'px';
+    const m = solo ? 0 : 10; // en el sitio es un pop-up con margen; en /lucia ocupa toda la pantalla
+    panel.style.height = (vv.height - 2 * m) + 'px';
+    panel.style.top = (vv.offsetTop + m) + 'px';
     window.scrollTo(0, 0);
     bajar();
   }
   if (vv) { vv.addEventListener('resize', ajustarTeclado); vv.addEventListener('scroll', ajustarTeclado); }
   function cerrarPanel() {
-    panel.style.height = ''; panel.style.top = ''; panel.classList.remove('open'); document.body.classList.remove('asis-bloqueado'); btn.style.display = ''; btn.focus(); }
+    panel.style.height = ''; panel.style.top = ''; panel.classList.remove('open'); fondo.classList.remove('open'); document.body.classList.remove('asis-bloqueado'); btn.style.display = ''; btn.focus(); }
   btn.onclick = abrir; cerrar.onclick = cerrarPanel;
   panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarPanel(); });
   foot.onsubmit = (e) => { e.preventDefault(); const t = input.value; input.value = ''; preguntar(t); };
 
-  document.body.append(btn, panel);
+  const fondo = el('div', 'asis-fondo'); fondo.onclick = () => cerrarPanel();
+  document.body.append(fondo, btn, panel);
   if (solo) {
     const volver = el('a', 'asis-volver', 'Ir al sitio'); volver.href = '/';
     head.insertBefore(volver, cerrar);

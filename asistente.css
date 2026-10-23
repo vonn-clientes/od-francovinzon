@@ -182,3 +182,20 @@ html:has(.asis-solo), .asis-solo { overscroll-behavior: none; }
   
 }
 @media (min-width: 641px) { .asis-panel { width: min(420px, calc(100vw - 40px)); height: min(680px, calc(100dvh - 40px)); } .asis-solo .asis-panel { width: min(560px, 100%); height: calc(100dvh - 48px); } }
+
+/* ---- Encabezado compacto (foto a la izquierda, datos a la derecha) y sin movimiento lateral ---- */
+.asis-head { grid-template-columns: auto 1fr auto; align-items: center; justify-items: start; column-gap: 10px; row-gap: 0; padding: calc(6px + env(safe-area-inset-top)) 12px 6px; }
+body:not(.asis-solo) .asis-head { padding-top: 8px; }
+.asis-head .asis-avatar { grid-column: 1; grid-row: 1; width: 44px; height: 44px; }
+.asis-head .asis-on { width: 11px; height: 11px; border-width: 1.5px; }
+.asis-head > div:not(.asis-avatar) { grid-column: 2; grid-row: 1; text-align: left; min-width: 0; }
+.asis-head strong { display: block; font-size: .95rem; line-height: 1.15; }
+.asis-head small { font-size: .72rem; line-height: 1.2; }
+.asis-volver { grid-column: 3; grid-row: 1; justify-self: end; font-size: .88rem; }
+.asis-volver::before { content: none; }
+.asis-close { grid-column: 3; grid-row: 1; justify-self: end; }
+.asis-panel, .asis-body { overflow-x: hidden; max-width: 100%; }
+.asis-body { touch-action: pan-y; overscroll-behavior: contain; }
+.asis-msg { overflow-wrap: anywhere; }
+html:has(.asis-solo), .asis-solo { overflow: hidden; touch-action: pan-y; max-width: 100vw; }
+.asis-body { overflow-x: clip; }

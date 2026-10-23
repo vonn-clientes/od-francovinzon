@@ -9,6 +9,7 @@
   const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt) e.textContent = txt; return e; };
 
   const NOMBRE = 'Lucía';
+  const solo = document.body.classList.contains('asis-solo'); // página /lucia (la del QR)
   const DIENTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 3.5c-2.2 0-4 1.8-4 4.3 0 2 .8 3.4 1.3 5.2.5 1.9.4 4.5 1.4 6.5.5 1 1.6 1.2 2.1.2.6-1.2.6-3.1 1.7-3.1s1.1 1.9 1.7 3.1c.5 1 1.6.8 2.1-.2 1-2 .9-4.6 1.4-6.5.5-1.800 1.300-3.200 1.300-5.200 0-2.500-1.800-4.300-4-4.300-1.600 0-2.200.8-3 .8s-1.400-.8-3-.8z" transform="translate(1.300 0)"/></svg>';
   function avatar() {
     const a = el('span', 'asis-avatar'); a.setAttribute('aria-hidden', 'true');
@@ -37,7 +38,7 @@
   const enviar = el('button', 'asis-send', 'Enviar'); enviar.type = 'submit';
   foot.append(input, enviar);
   const wa = el('a', 'asis-wa', 'Prefiero hablar por WhatsApp'); wa.href = WA; wa.target = '_blank'; wa.rel = 'noopener';
-  panel.append(head, body, foot);
+  panel.append(head, body, nota, foot);
 
   // Texto seguro: escapa todo y convierte solo links http(s) en <a>.
   function render(contenedor, texto) {
@@ -97,16 +98,22 @@
 
   function abrir() {
     panel.classList.add('open'); btn.style.display = 'none';
+    if (window.matchMedia('(max-width: 640px)').matches && !solo) document.body.classList.add('asis-bloqueado');
     if (!body.childElementCount) { burbuja('bot', '¡Hola! Soy Lucía, la asistente virtual del consultorio del Dr. Franco Vinzón. Te cuento sobre horarios, tratamientos y obras sociales. Los turnos los coordina Ayelén por WhatsApp. ¿En qué te ayudo?'); sugerencias(); }
     setTimeout(() => input.focus(), 50);
     try { window.va && window.va('event', { name: 'asistente_abierto' }); } catch (e) {}
   }
-  function cerrarPanel() { panel.classList.remove('open'); btn.style.display = ''; btn.focus(); }
+  function cerrarPanel() { panel.classList.remove('open'); document.body.classList.remove('asis-bloqueado'); btn.style.display = ''; btn.focus(); }
   btn.onclick = abrir; cerrar.onclick = cerrarPanel;
   panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarPanel(); });
   foot.onsubmit = (e) => { e.preventDefault(); const t = input.value; input.value = ''; preguntar(t); };
 
   document.body.append(btn, panel);
+  if (solo) {
+    const volver = el('a', 'asis-volver', 'Ir al sitio'); volver.href = '/';
+    head.insertBefore(volver, cerrar);
+    abrir();
+  }
   // Link directo: cualquier página con ?lucia=1 abre el chat de Lucía apenas carga.
   try { if (new URLSearchParams(location.search).get('lucia') === '1') abrir(); } catch (e) {}
 })();

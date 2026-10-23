@@ -5,6 +5,8 @@ import {
 } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
 import { conReintentos } from '../../lib/retry.js';
+import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
+import { normalizarDni } from '../../lib/pacientesSheet.js';
 
 export default async function handler(req, res) {
   if (!isValidGestionKey(req.query.key)) {
@@ -80,6 +82,26 @@ export default async function handler(req, res) {
         confirmado: extraerConfirmado(ev.description),
       });
     });
+
+    // Ficha confirmada (para el botón QR "Mis datos"): solo si el DNI del turno coincide
+    // EXACTO con una persona del registro consolidado que ya tiene ficha. Si algo falla
+    // o hay duda, no se marca nada (sin fichaId no aparece el botón).
+    try {
+      const conDni = items.filter((it) => it.dni && it.tipo !== 'bloqueo');
+      if (conDni.length) {
+        const filas = await listarPacientesConsolidados({ cache: true });
+        const porDni = new Map();
+        for (const f of filas) {
+          const d = f.dni && normalizarDni(f.dni);
+          if (!d || !f.fichaId) continue;
+          porDni.set(d, porDni.has(d) ? null : f.fichaId);
+        }
+        for (const it of conDni) {
+          const fichaId = porDni.get(normalizarDni(it.dni));
+          if (fichaId) it.fichaId = fichaId;
+        }
+      }
+    } catch { /* sin fichaId: no se muestra el botón QR */ }
 
     items.sort((a, b) => new Date(a.start) - new Date(b.start));
 

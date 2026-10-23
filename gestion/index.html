@@ -842,6 +842,20 @@
   </div>
 </div>
 
+<div class="confirm-overlay hidden" id="qr-modal-overlay">
+  <div class="confirm-box" style="text-align:center; max-width: 420px;">
+    <div class="tasks-modal-header">
+      <h3 id="qr-titulo">Completá tus datos</h3>
+      <button class="tasks-modal-close" id="qr-modal-close" aria-label="Cerrar">✕</button>
+    </div>
+    <p id="qr-nombre" style="margin:0 0 6px; font-weight:700;"></p>
+    <p style="margin:0 0 14px; font-size:14px;">Escaneá este código con la cámara del celular</p>
+    <div id="qr-img" style="display:inline-block; background:#fff; padding:14px; border-radius:12px; min-height:240px; min-width:240px;"></div>
+    <p id="qr-estado" style="margin:12px 0 0; font-size:13px; color:var(--muted);"></p>
+    <div class="panel-actions"><button class="btn-cancel" id="qr-cerrar-btn">Cerrar</button></div>
+  </div>
+</div>
+
 <div class="confirm-overlay hidden" id="ticket-modal-overlay">
   <div class="confirm-box ticket-modal-box">
     <div class="tasks-modal-header">
@@ -867,6 +881,7 @@
 
 <audio id="radio-audio" preload="none"></audio>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@29.1.3/dist/js/intlTelInputWithUtils.min.js"></script>
 <script>
 (function () {
@@ -878,6 +893,8 @@
   const TRASH_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
   // Ícono de impresora (Feather "printer") para el ticket térmico.
   const PRINTER_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>';
+  // Ícono QR (Feather "grid") para el botón "Mis datos" que reemplaza a la impresora.
+  const QR_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>';
   // Lapicito (Feather "edit-2"), superpuesto en la esquina del botón de WhatsApp para
   // editar el teléfono sin sumar un botón aparte en la fila — ver .wa-edit-wrap.
   const PENCIL_ICON = '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>';
@@ -1544,7 +1561,7 @@
       ? ''
       : `<div class="row-actions">
            <button class="icon-btn" data-action="mover" data-idx="${idx}" title="Editar turno">✏️</button>
-           <button class="icon-btn" data-action="imprimir" data-idx="${idx}" title="Imprimir ticket">${PRINTER_ICON}</button>
+           ${it.fichaId ? `<button class="icon-btn" data-action="qr" data-idx="${idx}" title="QR para que el paciente complete sus datos">${QR_ICON}</button>` : ''}
            <button class="icon-btn trash" data-action="cancelar" data-idx="${idx}" title="Cancelar">${TRASH_ICON}</button>
          </div>`;
     return `
@@ -1573,8 +1590,8 @@
         if (btn.dataset.action === 'mover') {
           if (item.tipo === 'turno') abrirMoverTurnoCalendario(item);
           else abrirMover(item);
-        } else if (btn.dataset.action === 'imprimir') {
-          abrirTicketPreview(item);
+        } else if (btn.dataset.action === 'qr') {
+          abrirQrMisDatos(item);
         } else {
           cancelarItem(item);
         }
@@ -1706,7 +1723,7 @@
     }
     if (it.tipo !== 'bloqueo') {
       botones.push(`<button class="icon-btn" data-action="mover" data-idx="${idx}" title="Editar turno">✏️</button>`);
-      botones.push(`<button class="icon-btn" data-action="imprimir" data-idx="${idx}" title="Imprimir ticket">${PRINTER_ICON}</button>`);
+      if (it.fichaId) botones.push(`<button class="icon-btn" data-action="qr" data-idx="${idx}" title="QR para que el paciente complete sus datos">${QR_ICON}</button>`);
       botones.push(`<button class="icon-btn trash" data-action="cancelar" data-idx="${idx}" title="Cancelar">${TRASH_ICON}</button>`);
     }
     const acciones = botones.length ? `<div class="row-actions">${botones.join('')}</div>` : '';
@@ -1787,8 +1804,8 @@
     if (action === 'mover') {
       if (item.tipo === 'turno') abrirMoverTurnoCalendario(item);
       else abrirMover(item);
-    } else if (action === 'imprimir') {
-      abrirTicketPreview(item);
+    } else if (action === 'qr') {
+      abrirQrMisDatos(item);
     } else if (action === 'cancelar') {
       cancelarItem(item);
     } else if (action === 'agregar-tel' || action === 'editar-tel') {
@@ -2536,6 +2553,41 @@
         })
         .catch((err) => { if (err.message !== 'unauthorized') { /* no-op, se puede reintentar */ } });
     });
+  }
+
+  // ---------- QR "Mis datos" (reemplaza momentáneamente a la impresora) ----------
+  // El servidor firma un enlace corto (vale pocas horas) que abre /mis-datos con SOLO
+  // los datos personales de esa ficha. El QR se dibuja acá, en el navegador.
+  const qrOverlay = document.getElementById('qr-modal-overlay');
+  function cerrarQr() {
+    qrOverlay.classList.remove('show');
+    setTimeout(() => { qrOverlay.classList.add('hidden'); document.getElementById('qr-img').innerHTML = ''; }, 180);
+  }
+  document.getElementById('qr-modal-close').addEventListener('click', cerrarQr);
+  document.getElementById('qr-cerrar-btn').addEventListener('click', cerrarQr);
+  async function abrirQrMisDatos(item) {
+    document.getElementById('qr-nombre').textContent = item.title || '';
+    document.getElementById('qr-img').innerHTML = '';
+    document.getElementById('qr-estado').textContent = 'Generando…';
+    qrOverlay.classList.remove('hidden');
+    requestAnimationFrame(() => qrOverlay.classList.add('show'));
+    try {
+      const r = await fetch('/api/gestion/pacientes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: gestionKey, accion: 'autoficha-token', fichaId: item.fichaId }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.url) throw new Error(data.error || 'No se pudo generar el QR.');
+      const qr = qrcode(0, 'M');
+      qr.addData(data.url);
+      qr.make();
+      document.getElementById('qr-img').innerHTML = qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true });
+      const svg = document.querySelector('#qr-img svg');
+      if (svg) { svg.style.width = '240px'; svg.style.height = '240px'; }
+      document.getElementById('qr-estado').textContent = 'El código vale 3 horas. Si se vence, generalo de nuevo.';
+    } catch (e) {
+      document.getElementById('qr-estado').textContent = e.message || 'No se pudo generar el QR.';
+    }
   }
 
   // ---------- Ticket térmico (impresora 58mm) ----------

@@ -13,6 +13,10 @@
     {
       "source": "/t/:codigo",
       "destination": "/api/reservar?codigo=:codigo"
+    },
+    {
+      "source": "/c/:codigo",
+      "destination": "/api/reservar?codigo=:codigo&confirmar=1"
     }
   ],
   "functions": {

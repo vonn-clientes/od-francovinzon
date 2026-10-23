@@ -242,12 +242,12 @@ async function postReservaOnline(req, res) {
 // ---------- 2. Textos y plantillas ----------
 
 const TEXTOS_DEFAULT = {
-  // Placeholders: {{saludo}} {{nombre}} {{cuando}} {{hora}} {{tipo}} — sin {{link}}
-  // desde 2026-08-14: la confirmación pasó a ser escrita (el paciente responde por el
-  // chat), no por un link.
+  // Placeholders: {{saludo}} {{nombre}} {{cuando}} {{hora}} {{tipo}} {{link}}
+  // {{link}} = link que confirma el turno al abrirlo (2026-10-23). Si un turno no tiene
+  // código, /gestion saca la línea del link y pide responder por el chat.
   whatsappTemplate:
     '¡Hola, {{saludo}}!!! Te quería recordar el siguiente {{tipo}}:\n\n{{nombre}}\n{{cuando}} a las {{hora}}hs\n\n' +
-    'Confirmame por acá que vas a poder venir. Cualquier cosita que no puedas, avisanos. Te esperamos.',
+    'Tocá este link para confirmar que vas a venir:\n{{link}}\n\nSi no podés venir, avisanos por acá. Te esperamos.',
   direccion: 'Ameghino 410, E3260 Concepción del Uruguay, Entre Ríos, Argentina',
   bienvenidaNuevoPaciente: '¡Bienvenido/a! Te esperamos con gusto en tu primera visita.',
 };

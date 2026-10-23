@@ -136,3 +136,16 @@ html:has(.asis-solo), .asis-solo { overscroll-behavior: none; }
 .asis-volver { grid-column: 1; grid-row: 1; justify-self: start; align-self: center; margin: 0; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,.16); text-decoration: none; font-weight: 600; opacity: 1; }
 .asis-close { grid-column: 3; grid-row: 1; justify-self: end; align-self: center; margin: 0; }
 .asis-head .asis-avatar { width: 66px; height: 66px; } .asis-head .asis-avatar img { border: 2px solid rgba(255,255,255,.9); box-sizing: border-box; } .asis-head .asis-on { width: 14px; height: 14px; }
+
+/* ---- Caja de texto tipo Mensajes: píldora con el botón de enviar adentro ---- */
+.asis-panel { background: #fff; }
+.asis-foot { margin: 6px 12px calc(10px + env(safe-area-inset-bottom)); padding: 4px 4px 4px 4px; background: #fff; border: 1px solid #c9c9ce; border-radius: 24px; align-items: center; gap: 4px; transition: border-color .15s, box-shadow .15s; }
+.asis-foot:focus-within { border-color: #1E3A5F; box-shadow: 0 0 0 3px rgba(212,162,76,.40); }
+.asis-input { border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 0; padding: 8px 6px 8px 14px; outline: none !important; }
+.asis-input::placeholder { color: #8a8a8e; }
+.asis-send { flex: none; width: 54px; height: 34px; border-radius: 17px; background: #1E3A5F; color: #fff; display: grid; place-items: center; transition: opacity .15s, transform .15s; }
+.asis-send::before { content: ''; width: 20px; height: 20px; margin: 0; clip-path: none; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20V5'/%3E%3Cpath d='M5.5 11.5 12 5l6.5 6.5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20V5'/%3E%3Cpath d='M5.5 11.5 12 5l6.5 6.5'/%3E%3C/svg%3E") center / contain no-repeat; }
+.asis-foot:has(.asis-input:placeholder-shown) .asis-send { opacity: 0; transform: scale(.7); pointer-events: none; }
+.asis-send:disabled { opacity: .5; }

@@ -389,6 +389,8 @@
   .af-item.sel { border-color: var(--navy); background: #e8eef7; }
   .af-msg { font-size: 13px; min-height: 18px; margin: 4px 0 8px; color: var(--muted); }
   .af-msg.error { color: #b3261e; }
+  .af-cob { flex: 1; padding: 10px; border-radius: 100px; border: 1.5px solid var(--navy); background: #fff; color: var(--navy); font-weight: 700; font-size: 13.5px; }
+  .af-cob[aria-pressed="true"] { background: var(--navy); color: #fff; }
   .af-link { background: none; border: none; color: var(--navy); font-weight: 700; text-decoration: underline; padding: 4px 0; font-size: 13.5px; }
   .af-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
   .af-grid .full { grid-column: 1 / -1; }
@@ -872,12 +874,21 @@
         <input type="text" id="af-dni" inputmode="numeric" placeholder="DNI">
         <input type="text" id="af-fnac" placeholder="Fecha de nacimiento (dd/mm/aaaa)">
         <input type="tel" id="af-tel" placeholder="Teléfono">
-        <input type="text" id="af-os" placeholder="Obra social (vacío = particular)">
+        <input type="email" id="af-email" class="full" placeholder="Correo electrónico" autocomplete="off">
+        <input type="text" id="af-dom" class="full" placeholder="Domicilio">
+        <input type="text" id="af-loc" class="full" list="localidades-lista" placeholder="Localidad (elegí o escribí otra)" autocomplete="off">
+      </div>
+      <div style="margin:2px 0 8px;font-size:13px;font-weight:700;color:var(--navy)">¿Es paciente particular o tiene obra social? *</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button type="button" class="af-cob" data-cob="particular" aria-pressed="false">Particular</button>
+        <button type="button" class="af-cob" data-cob="obra" aria-pressed="false">Tiene obra social</button>
+      </div>
+      <div id="af-obra-wrap" class="af-grid hidden">
+        <input type="text" id="af-os" class="full" placeholder="Obra social *">
         <input type="text" id="af-afiliado" placeholder="N° de afiliado">
         <input type="text" id="af-plan" placeholder="Plan">
-        <input type="text" id="af-dom" class="full" placeholder="Domicilio">
-        <input type="text" id="af-loc" class="full" placeholder="Localidad">
       </div>
+      <datalist id="localidades-lista"><option value="Concepción del Uruguay"><option value="Gualeguaychú"><option value="San José"><option value="Caseros"><option value="Urdinarrain"><option value="San Justo"><option value="Colón"><option value="Basavilbaso"><option value="Villa Elisa"><option value="Pronunciamiento"></datalist>
       <button type="button" class="af-link" id="af-ir-buscar">← Volver a buscar ficha</button>
     </div>
     <div class="af-msg" id="af-msg"></div>
@@ -2660,7 +2671,8 @@
     afEl('af-apellido').value = apellido;
     afEl('af-dni').value = item.dni || '';
     afEl('af-tel').value = item.telefono || '';
-    ['af-fnac', 'af-os', 'af-afiliado', 'af-plan', 'af-dom', 'af-loc'].forEach((id) => { afEl(id).value = ''; });
+    ['af-fnac', 'af-email', 'af-os', 'af-afiliado', 'af-plan', 'af-dom', 'af-loc'].forEach((id) => { afEl(id).value = ''; });
+    afSetCob('');
     afVista('buscar');
     afOverlay.classList.remove('hidden');
     requestAnimationFrame(() => afOverlay.classList.add('show'));
@@ -2672,6 +2684,13 @@
         .catch(() => { afMsg('No se pudieron cargar las fichas. Cerrá y volvé a abrir.', true); });
     }
   }
+  let afCob = '';
+  function afSetCob(v) {
+    afCob = v;
+    document.querySelectorAll('.af-cob').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.cob === v)));
+    afEl('af-obra-wrap').classList.toggle('hidden', v !== 'obra');
+  }
+  document.querySelectorAll('.af-cob').forEach((b) => b.addEventListener('click', () => afSetCob(b.dataset.cob)));
   function afCerrar() {
     afOverlay.classList.remove('show');
     setTimeout(() => afOverlay.classList.add('hidden'), 180);
@@ -2722,9 +2741,13 @@
       } else {
         const nombre = afEl('af-nombre').value.trim(), apellido = afEl('af-apellido').value.trim();
         if (!nombre || !apellido) { afMsg('Nombre y apellido son obligatorios.', true); return; }
+        if (!afCob) { afMsg('Indicá si es particular o tiene obra social.', true); return; }
+        if (afCob === 'obra' && !afEl('af-os').value.trim()) { afMsg('Escribí el nombre de la obra social.', true); return; }
         const campos = {
           dni: afEl('af-dni').value.trim(), fechaNacimiento: afEl('af-fnac').value.trim(), telefono: afEl('af-tel').value.trim(),
-          obraSocial: afEl('af-os').value.trim(), nAfiliado: afEl('af-afiliado').value.trim(), plan: afEl('af-plan').value.trim(),
+          email: afEl('af-email').value.trim(),
+          obraSocial: afCob === 'particular' ? 'Particular' : afEl('af-os').value.trim(),
+          nAfiliado: afCob === 'obra' ? afEl('af-afiliado').value.trim() : '', plan: afCob === 'obra' ? afEl('af-plan').value.trim() : '',
           domicilio: afEl('af-dom').value.trim(), localidad: afEl('af-loc').value.trim(),
         };
         afMsg('Creando la ficha…');

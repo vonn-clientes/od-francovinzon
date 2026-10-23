@@ -72,3 +72,30 @@ body.asis-bloqueado { overflow: hidden; }
 }
 .asis-volver { margin-left: auto; color: #fff; opacity: .85; font-size: .8rem; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
 .asis-solo { overflow: hidden; }
+
+/* ---- Estilo WhatsApp (2026-10-23): fondo, burbujas con cola, hora, tildes y envío redondo ---- */
+.asis-body { background-color: #EFE8DC; background-image: radial-gradient(rgba(30,58,95,.045) 1.2px, transparent 1.3px); background-size: 18px 18px; padding: 14px 12px; gap: 6px; }
+.asis-msg { position: relative; border: 0 !important; border-radius: 12px; padding: 7px 10px 6px; box-shadow: 0 1px 1px rgba(0,0,0,.13); font-size: .97rem; line-height: 1.38; max-width: 82%; }
+.asis-bot { background: #fff; color: #1f2d3d; border-top-left-radius: 3px; margin-left: 8px; }
+.asis-user { background: #DCF8C6; color: #1f2d3d; border-top-right-radius: 3px; margin-right: 8px; }
+.asis-bot::before, .asis-user::before { content: ''; position: absolute; top: 0; width: 9px; height: 12px; }
+.asis-bot::before { left: -8px; background: #fff; clip-path: polygon(100% 0, 0 0, 100% 100%); }
+.asis-user::before { right: -8px; background: #DCF8C6; clip-path: polygon(0 0, 100% 0, 0 100%); }
+.asis-t { float: right; margin: 8px 0 -3px 12px; font-size: .68rem; color: #7c8794; white-space: nowrap; user-select: none; }
+.asis-user .asis-t { color: #5f7f5a; }
+.asis-user .asis-t::after { content: ' ✓✓'; color: #34a0d8; letter-spacing: -2px; }
+.asis-typing { background: #fff; border: 0; border-radius: 12px; border-top-left-radius: 3px; margin-left: 8px; box-shadow: 0 1px 1px rgba(0,0,0,.13); }
+.asis-chip { background: #fff; border: 0; box-shadow: 0 1px 2px rgba(0,0,0,.18); color: #1E3A5F; border-radius: 999px; padding: 9px 14px; font-size: .86rem; }
+.asis-chip:hover { background: #1E3A5F; color: #fff; }
+.asis-note { background: #EFE8DC; padding: 6px 14px 2px; text-align: center; font-size: .7rem; }
+.asis-foot { background: #EFE8DC; padding: 6px 10px 10px; align-items: flex-end; }
+.asis-input { border: 0; border-radius: 22px; padding: 11px 16px; background: #fff; box-shadow: 0 1px 1px rgba(0,0,0,.12); }
+.asis-input:focus-visible { outline: 2px solid var(--gold, #D4A24C); outline-offset: 0; }
+.asis-send { flex: none; width: 46px; height: 46px; min-width: 0 !important; padding: 0; border-radius: 50%; background: #1E3A5F; color: #fff; font-size: 0; display: grid; place-items: center; }
+.asis-send::before { content: ''; width: 20px; height: 20px; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%, 14% 50%); margin-left: 3px; }
+.asis-head { position: relative; z-index: 2; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+@media (max-width: 640px) {
+  .asis-panel { position: fixed; top: 0; left: 0; right: 0; bottom: auto; width: 100%; height: 100dvh; overflow: hidden; }
+  .asis-solo .asis-panel { position: fixed; top: 0; left: 0; right: 0; margin: 0; width: 100%; }
+}
+html:has(.asis-solo), .asis-solo { overscroll-behavior: none; }

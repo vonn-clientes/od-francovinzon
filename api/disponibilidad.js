@@ -1,6 +1,6 @@
 import { getCalendarClient, getDisponibilidadMes, getHorariosLibresDia } from '../lib/googleCalendar.js';
 import { avisarFallo } from '../lib/alertas.js';
-import { obtenerHorariosConfig, obtenerReservaOnlinePausada } from '../lib/adminConfig.js';
+import { getConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada } from '../lib/adminConfig.js';
 
 // Fusiona lo que antes eran disponibilidad-mes.js + horarios-dia.js (mismo patrón de
 // "modo" ya usado en api/gestion/buscar.js) para no sumar un archivo nuevo — ver
@@ -15,6 +15,11 @@ export default async function handler(req, res) {
   const esModoDia = req.query.modo === 'dia';
   const esModoEstado = req.query.modo === 'estado';
   try {
+    if (req.query.modo === 'listas') {
+      const listas = await getConfig('listas', { obrasSociales: [] });
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      return res.status(200).json({ obrasSociales: listas.obrasSociales || [] });
+    }
     if (esModoEstado) {
       const pausada = await obtenerReservaOnlinePausada();
       return res.status(200).json({ pausada });

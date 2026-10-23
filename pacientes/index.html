@@ -482,7 +482,7 @@
       </div>
       <div id="np-obra-wrap" class="hidden">
         <div class="field-row">
-          <div class="field"><label for="np-os">Obra social *</label><input type="text" id="np-os"></div>
+          <div class="field"><label for="np-os">Obra social *</label><input type="text" id="np-os" data-combo-obra></div>
           <div class="field"><label for="np-afiliado">N° de afiliado</label><input type="text" id="np-afiliado"></div>
           <div class="field"><label for="np-plan">Plan</label><input type="text" id="np-plan"></div>
         </div>
@@ -587,7 +587,7 @@
         <div class="field"><label for="ficha-telefono">Teléfono</label><input type="tel" id="ficha-telefono" data-campo="telefono" inputmode="tel"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label for="ficha-obra-social">Obra social</label><input type="text" id="ficha-obra-social" data-campo="obraSocial" list="lista-obras-sociales"></div>
+        <div class="field"><label for="ficha-obra-social">Obra social</label><input type="text" id="ficha-obra-social" data-campo="obraSocial" data-combo-obra></div>
         <div class="field"><label for="ficha-afiliado">Nº de afiliado</label><input type="text" id="ficha-afiliado" data-campo="nAfiliado"></div>
         <div class="field"><label for="ficha-plan">Plan</label><input type="text" id="ficha-plan" data-campo="plan" list="lista-planes"></div>
       </div>
@@ -651,7 +651,12 @@
       </div>
       <div class="mov-tipo-hint" id="mov-tipo-hint"></div>
       <div class="field-row">
-        <div class="field full" id="mov-forma-pago-wrap"><label for="mov-forma-pago">Forma de pago</label><input type="text" id="mov-forma-pago" placeholder="Ej: Efectivo, MP, Transferencia"></div>
+        <div class="field full" id="mov-forma-pago-wrap"><label for="mov-forma-pago">Forma de pago</label><select id="mov-forma-sel">
+            <option value="">Elegí una forma de pago…</option>
+            <option>Efectivo</option><option>Transferencia (Aye)</option><option>Transferencia (Guille)</option><option>Transferencia (Euge)</option><option>Transferencia (Fausto)</option><option>Transferencia</option>
+            <option value="__otra">Otra (escribir)…</option>
+          </select>
+          <input type="text" id="mov-forma-pago" placeholder="Escribí la forma de pago" style="display:none;margin-top:6px"></div>
       </div>
       <div class="panel-actions">
         <span class="autosave-hint hidden" id="mov-autosave-hint"></span>
@@ -675,7 +680,7 @@
 
     <div class="panel" id="panel-obra-social">
       <div class="field-row">
-        <div class="field"><label for="obra-social-datos">Obra social</label><input type="text" id="obra-social-datos" data-campo="obraSocial" list="lista-obras-sociales"></div>
+        <div class="field"><label for="obra-social-datos">Obra social</label><input type="text" id="obra-social-datos" data-campo="obraSocial" data-combo-obra></div>
         <div class="field"><label for="afiliado-datos">Nº de afiliado</label><input type="text" id="afiliado-datos" data-campo="nAfiliado"></div>
         <div class="field"><label for="plan-datos">Plan</label><input type="text" id="plan-datos" data-campo="plan" list="lista-planes"></div>
       </div>
@@ -1619,7 +1624,7 @@
     // Vaciar campos y estado por más que los paneles ya estén ocultos.
     clearTimeout(movAutosaveTimer); movAutosaveTimer = null;
     clearTimeout(presAutosaveTimer); presAutosaveTimer = null;
-    movFecha.value = ''; movTratamiento.value = ''; movDebe.value = ''; movHaber.value = ''; movFormaPago.value = '';
+    movFecha.value = ''; movTratamiento.value = ''; movDebe.value = ''; movHaber.value = ''; setFormaPago('');
     movMsg.classList.add('hidden');
     movTipoHint.textContent = '';
     // El indicador de autosave del encabezado también es por-ficha: no puede quedar el
@@ -1996,6 +2001,26 @@
   const movDebe = document.getElementById('mov-debe');
   const movHaber = document.getElementById('mov-haber');
   const movFormaPago = document.getElementById('mov-forma-pago');
+  const movFormaSel = document.getElementById('mov-forma-sel');
+  const FORMAS_PAGO = [...movFormaSel.options].map((o) => o.value || o.text).filter((v) => v && v !== '__otra' && !v.startsWith('Elegí'));
+  function canonFormaPago(v) {
+    const t = String(v || '').trim();
+    if (/^(ef|efvo|efectivo)\.?$/i.test(t)) return 'Efectivo';
+    return FORMAS_PAGO.find((f) => f.toLowerCase() === t.toLowerCase()) || t;
+  }
+  // Fija la forma de pago desde código: elige la opción de la lista o muestra el campo libre.
+  function setFormaPago(v) {
+    const c = canonFormaPago(v);
+    movFormaPago.value = c;
+    if (!c) { movFormaSel.value = ''; movFormaPago.style.display = 'none'; }
+    else if (FORMAS_PAGO.includes(c)) { movFormaSel.value = c; movFormaPago.style.display = 'none'; }
+    else { movFormaSel.value = '__otra'; movFormaPago.style.display = ''; }
+  }
+  movFormaSel.addEventListener('change', () => {
+    if (movFormaSel.value === '__otra') { movFormaPago.value = ''; movFormaPago.style.display = ''; movFormaPago.focus(); }
+    else { movFormaPago.value = movFormaSel.value; movFormaPago.style.display = 'none'; }
+    movFormaPago.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   const movDolarWrap = document.getElementById('mov-dolar-wrap');
   const movMonedaDebe = document.getElementById('mov-moneda-debe');
   const movMonedaHaber = document.getElementById('mov-moneda-haber');
@@ -2039,7 +2064,6 @@
   // "Tratamiento" de movimientos pasa a Title Case (como los campos de ficha, ver
   // decisions.md) a pedido explícito — 2026-08-13, solo se guardaba en mayúscula
   // completa antes. "Forma de pago" sigue en mayúscula, no se pidió cambiarla.
-  [movFormaPago].forEach(conectarMayusculas);
   let mostrarMovimientosAnulados = false;
   let fichaMovimientosAnuladosId = null;
 
@@ -2117,7 +2141,7 @@
       movTratamiento.value = mov.tratamiento;
       movDebe.value = montoSheetANumero(mov.debe);
       movHaber.value = montoSheetANumero(mov.haber);
-      movFormaPago.value = mov.formaPago || '';
+      setFormaPago(mov.formaPago);
       movMonedaDebe.value = mov.monedaDebe === 'USD' ? 'USD' : 'ARS';
       movMonedaHaber.value = mov.monedaHaber === 'USD' ? 'USD' : 'ARS';
       movAplica.value = mov.aplicaA || movMonedaHaber.value;
@@ -2129,7 +2153,7 @@
       movTratamiento.value = '';
       movDebe.value = '';
       movHaber.value = '';
-      movFormaPago.value = '';
+      setFormaPago('');
       movMonedaDebe.value = 'ARS'; movMonedaHaber.value = 'ARS'; movAplica.value = 'ARS'; movCotizacion.value = '';
     }
     // Fichas con dólares: el bloque ya viene abierto. Las demás lo ven como un link chico.
@@ -2264,7 +2288,7 @@
           movTratamiento.value = orig.tratamiento;
           movDebe.value = montoSheetANumero(orig.debe);
           movHaber.value = montoSheetANumero(orig.haber);
-          movFormaPago.value = orig.formaPago || '';
+          setFormaPago(orig.formaPago);
           actualizarHintTipo();
         }
         mostrarHintMov('Un movimiento ya existente no se borra vaciándolo — se restauró el original (usá ✕ Anular para quitarlo).', 'error');

@@ -1552,6 +1552,7 @@
       ? ''
       : `<div class="row-actions">
            <button class="icon-btn" data-action="mover" data-idx="${idx}" title="Editar turno">✏️</button>
+           <button class="icon-btn" data-action="imprimir" data-idx="${idx}" title="Imprimir ticket">${PRINTER_ICON}</button>
            <button class="icon-btn trash" data-action="cancelar" data-idx="${idx}" title="Cancelar">${TRASH_ICON}</button>
          </div>`;
     return `
@@ -1580,6 +1581,8 @@
         if (btn.dataset.action === 'mover') {
           if (item.tipo === 'turno') abrirMoverTurnoCalendario(item);
           else abrirMover(item);
+        } else if (btn.dataset.action === 'imprimir') {
+          abrirTicketPreview(item);
         } else if (btn.dataset.action === 'datos') {
           abrirDatosPaciente(item);
         } else {
@@ -1713,6 +1716,7 @@
     }
     if (it.tipo !== 'bloqueo') {
       botones.push(`<button class="icon-btn" data-action="mover" data-idx="${idx}" title="Editar turno">✏️</button>`);
+      botones.push(`<button class="icon-btn" data-action="imprimir" data-idx="${idx}" title="Imprimir ticket">${PRINTER_ICON}</button>`);
       botones.push(`<button class="icon-btn trash" data-action="cancelar" data-idx="${idx}" title="Cancelar">${TRASH_ICON}</button>`);
     }
     const acciones = botones.length ? `<div class="row-actions">${botones.join('')}</div>` : '';
@@ -1793,6 +1797,8 @@
     if (action === 'mover') {
       if (item.tipo === 'turno') abrirMoverTurnoCalendario(item);
       else abrirMover(item);
+    } else if (action === 'imprimir') {
+      abrirTicketPreview(item);
     } else if (action === 'datos') {
       abrirDatosPaciente(item);
     } else if (action === 'cancelar') {

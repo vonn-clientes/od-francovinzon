@@ -12,7 +12,9 @@
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
   var norm = function (t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); };
 
-  function attach(input) {
+  function attach(input, cfg) {
+    cfg = cfg || {};
+    var items = cfg.items || LOCALIDADES, titulo = cfg.titulo || 'Localidades frecuentes';
     if (!input || input.dataset.clListo) return;
     input.dataset.clListo = '1';
     input.setAttribute('autocomplete', 'off'); input.removeAttribute('list');
@@ -24,9 +26,11 @@
 
     function pintar() {
       var q = norm(input.value.trim());
-      opciones = LOCALIDADES.filter(function (l) { return !q || norm(l).indexOf(q) !== -1; });
+      var fuente = typeof items === 'function' ? items() : items;
+      opciones = fuente.filter(function (l) { return !q || norm(l).indexOf(q) !== -1; });
+      if (cfg.otra) opciones = opciones.concat([OTRA]);
       if (!opciones.length || (opciones.length === 1 && norm(opciones[0]) === q)) { cerrar(); return; }
-      lista.innerHTML = '<div class="cl-tit">Localidades frecuentes</div>';
+      lista.innerHTML = '<div class="cl-tit">' + titulo + '</div>';
       opciones.forEach(function (l, i) {
         var b = document.createElement('button'); b.type = 'button'; b.className = 'cl-op'; b.setAttribute('role', 'option'); b.textContent = l; b.dataset.i = i;
         lista.appendChild(b);
@@ -43,6 +47,7 @@
     }
     function cerrar() { lista.hidden = true; act = -1; }
     function elegir(texto) {
+      if (texto === OTRA) { input.value = ''; cerrar(); input.focus(); input.dispatchEvent(new Event('input', { bubbles: true })); return; }
       input.value = texto;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -71,7 +76,21 @@
     });
   }
 
+  var OTRA = '✎ Otra (escribir)…';
+  var OBRAS_DEFAULT = ['Particular', 'Ospe', 'Oser', 'Iosper', 'Sancor Salud', 'Sancor Salud (IVA gravado)', 'Sancor Salud (IVA no gravado)', 'Pami', 'Unión Personal', 'Osseg', 'Dasuten', 'Medicus', 'Jerárquicos Salud', 'Ospia', 'Municipal', 'Osalara', 'Ospim', 'Osecac', 'Osuner', 'Osde', 'Poder Judicial', 'Unimédica', 'Osfatlyf', 'Swiss Medical', 'Amebpba', 'Federada Salud', 'Iosfa', 'Osplad'];
+  var obras = OBRAS_DEFAULT.slice();
+  function attachObra(input) { attach(input, { items: function () { return obras; }, titulo: 'Obras sociales', otra: true }); }
+  // La lista real se edita en /admin → Listas desplegables; si no carga, queda la de arriba.
+  function cargarObras() {
+    try {
+      fetch('/api/disponibilidad?modo=listas').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        if (d && Array.isArray(d.obrasSociales) && d.obrasSociales.length) obras = d.obrasSociales.filter(Boolean);
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function autoObra() { cargarObras(); document.querySelectorAll('input[data-combo-obra]').forEach(attachObra); }
   function auto() { document.querySelectorAll('input[data-combo-localidad]').forEach(attach); }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', auto); else auto();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { auto(); autoObra(); }); else { auto(); autoObra(); }
   window.ComboLocalidad = { attach: attach };
+  window.ComboObraSocial = { attach: attachObra };
 })();

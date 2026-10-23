@@ -271,7 +271,7 @@ async function postTextos(req, res) {
 // ---------- 3. Listas desplegables ----------
 
 const LISTAS_DEFAULT = {
-  obrasSociales: ['Particular'],
+  obrasSociales: ['Particular', 'Ospe', 'Oser', 'Iosper', 'Sancor Salud', 'Sancor Salud (IVA gravado)', 'Sancor Salud (IVA no gravado)', 'Pami', 'Unión Personal', 'Osseg', 'Dasuten', 'Medicus', 'Jerárquicos Salud', 'Ospia', 'Municipal', 'Osalara', 'Ospim', 'Osecac', 'Osuner', 'Osde', 'Poder Judicial', 'Unimédica', 'Osfatlyf', 'Swiss Medical', 'Amebpba', 'Federada Salud', 'Iosfa', 'Osplad'],
   planes: ['Particular'],
   tratamientos: [
     'Escaneo 3D', 'Ortodoncia', 'Blanqueamiento dental', 'Odontopediatría',

@@ -1741,8 +1741,16 @@
     // Editable desde /admin (api/gestion/admin.js, recurso "textos") — si Fausto nunca
     // configuró nada, whatsappTemplateConfig queda null y el texto de siempre (líneas
     // de abajo) no cambia un carácter.
+    // {{link}}: link corto /c/CODIGO que confirma el turno apenas lo abre el paciente. Si el
+    // turno no tiene código (turnos viejos), se saca la línea del link y se pide responder.
+    const linkConfirmar = it.codigoCorto ? `${location.origin}/c/${it.codigoCorto}` : '';
     if (whatsappTemplateConfig) {
-      return whatsappTemplateConfig
+      let plantilla = whatsappTemplateConfig;
+      if (!linkConfirmar) {
+        plantilla = plantilla.split('\n').filter((l) => !l.includes('{{link}}')).join('\n').replace(/\n{3,}/g, '\n\n');
+      }
+      return plantilla
+        .replaceAll('{{link}}', linkConfirmar)
         .replaceAll('{{saludo}}', saludoActual())
         .replaceAll('{{tipo}}', tipoTexto)
         .replaceAll('{{nombre}}', nombre)
@@ -1752,7 +1760,8 @@
     return `¡Hola, ${saludoActual()}!!! Te quería recordar el siguiente ${tipoTexto}:\n\n` +
       `${nombre}\n` +
       `${cuandoCap} a las ${fmtHora(it.start)}hs\n\n` +
-      `Confirmame por acá que vas a poder venir. Cualquier cosita que no puedas, avisanos. Te esperamos.`;
+      (linkConfirmar ? `Tocá este link para confirmar que vas a venir:\n${linkConfirmar}\n\nSi no podés venir, avisanos por acá. Te esperamos.`
+        : `Confirmame por acá que vas a poder venir. Cualquier cosita que no puedas, avisanos. Te esperamos.`);
   }
 
   function armarLinkWhatsApp(telefonoRaw) {
@@ -3084,7 +3093,7 @@
       const r = await fetch(`/api/gestion/admin?recurso=textos&key=${encodeURIComponent(gestionKey)}`);
       if (!r.ok) return;
       const textos = await r.json();
-      if (textos && textos.whatsappTemplate && textos.whatsappTemplate !== WHATSAPP_TEMPLATE_VIEJA_CON_LINK) {
+      if (textos && textos.whatsappTemplate) {
         whatsappTemplateConfig = textos.whatsappTemplate;
       }
     } catch {

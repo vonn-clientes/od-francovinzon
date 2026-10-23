@@ -169,6 +169,28 @@ async function resolverCodigoCorto(req, res) {
     const match = candidatos.find(({ ev }) => ev.status !== 'cancelled' && extraerCodigoCorto(ev.description) === codigo);
     if (!match) return paginaLinkInvalido(res);
 
+    // Link de confirmación (/c/CODIGO): al abrirlo el turno queda confirmado, sin tocar
+    // ningún botón. Los "robots" que arman la vista previa del link (WhatsApp, etc.) NO
+    // confirman: solo ven una página neutra. Confirmar de nuevo no hace daño (idempotente).
+    if (req.query.confirmar) {
+      const ua = String(req.headers['user-agent'] || '');
+      const esRobot = req.method === 'HEAD' || /bot|crawl|spider|preview|whatsapp|facebookexternalhit|slack|telegram|embedly|curl|wget|python|node-fetch/i.test(ua);
+      const { start } = eventBounds(match.ev);
+      const detalle = `${match.ev.summary || 'tu turno'} — ${formatArgDay(start)} a las ${formatArgTime(start)}hs`;
+      const volver = new URLSearchParams({ eventId: match.ev.id });
+      if (match.calendarId === SOBRETURNOS_CALENDAR_ID) { volver.set('calendarId', match.calendarId); volver.set('tipo', 'sobreturno'); }
+      if (esRobot) return paginaConfirmacion(res, { confirmado: false, detalle, volver: volver.toString() });
+      if (!extraerConfirmado(match.ev.description)) {
+        await conReintentos(() => calendar.events.patch({
+          calendarId: match.calendarId, eventId: match.ev.id,
+          requestBody: { description: escribirConfirmado(match.ev.description || '', true) },
+        }));
+        await logActividad({ tipo: 'turno_confirmado', detalle: `${match.ev.summary || 'paciente'} — ${formatArgDay(start)} ${formatArgTime(start)}hs`, actor: 'paciente (link)' });
+        await espejarTurnosBestEffort();
+      }
+      return paginaConfirmacion(res, { confirmado: true, detalle, volver: volver.toString() });
+    }
+
     const params = new URLSearchParams({ eventId: match.ev.id });
     if (match.calendarId === SOBRETURNOS_CALENDAR_ID) {
       params.set('calendarId', match.calendarId);
@@ -180,6 +202,31 @@ async function resolverCodigoCorto(req, res) {
     await avisarFallo({ endpoint: 'api/reservar.js', detalle: 'resolver código corto', error: err });
     paginaLinkInvalido(res);
   }
+}
+
+function escaparHtml(t) { return String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function paginaConfirmacion(res, { confirmado, detalle, volver }) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).send(`<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirmación de turno | Franco Vinzón Odontólogo</title>
+<meta property="og:title" content="Confirmá tu turno"><meta property="og:description" content="Franco Vinzón Odontólogo">
+<style>
+  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #FAF9F6; color: #2A2A2A; margin: 0; padding: 40px 20px; text-align: center; }
+  .box { max-width: 380px; margin: 60px auto 0; background: #FFFFFF; border-radius: 22px; padding: 32px 24px; box-shadow: 0 2px 18px rgba(30,58,95,.08); }
+  .ok { font-size: 44px; margin-bottom: 6px; }
+  h1 { font-size: 20px; color: #1E3A5F; margin: 0 0 10px; font-family: Georgia, serif; }
+  p { font-size: 14.5px; line-height: 1.5; color: #6B6656; margin: 0 0 16px; }
+  a.sec { display: inline-block; color: #1E3A5F; font-weight: 600; font-size: 13.5px; text-decoration: underline; }
+</style></head>
+<body><div class="box">
+  <div class="ok">${confirmado ? '✅' : '🦷'}</div>
+  <h1>${confirmado ? '¡Turno confirmado!' : 'Franco Vinzón Odontólogo'}</h1>
+  <p>${escaparHtml(detalle)}</p>
+  <p>${confirmado ? 'Gracias por avisarnos. ¡Te esperamos!' : 'Abrí este link desde tu celular para confirmar el turno.'}</p>
+  <a class="sec" href="/turno?${escaparHtml(volver)}">Ver, mover o cancelar mi turno</a>
+</div></body></html>`);
 }
 
 // Página simple (sin depender de ningún archivo estático) para un código corto

@@ -258,12 +258,14 @@ async function getTextos(req, res) {
 }
 
 async function postTextos(req, res) {
-  const { whatsappTemplate, direccion, bienvenidaNuevoPaciente } = req.body;
+  const { whatsappTemplate, direccion, bienvenidaNuevoPaciente, mensajeDeuda, mensajeReactivar } = req.body;
   const actual = await getConfig('textos', TEXTOS_DEFAULT);
   await setConfig('textos', {
     whatsappTemplate: whatsappTemplate ?? actual.whatsappTemplate,
     direccion: direccion ?? actual.direccion,
     bienvenidaNuevoPaciente: bienvenidaNuevoPaciente ?? actual.bienvenidaNuevoPaciente,
+    mensajeDeuda: mensajeDeuda ?? actual.mensajeDeuda,
+    mensajeReactivar: mensajeReactivar ?? actual.mensajeReactivar,
   });
   await logActividad({ tipo: 'config_textos', detalle: 'Textos/plantilla de WhatsApp actualizados', actor: 'admin' });
   res.status(200).json({ success: true });

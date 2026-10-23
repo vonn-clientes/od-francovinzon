@@ -358,6 +358,8 @@
           </div>
           <div class="field-row">
             <div class="field full"><label for="t-bienvenida">Bienvenida a paciente nuevo</label><input type="text" id="t-bienvenida"></div>
+            <div class="field full"><label for="t-msg-deuda">WhatsApp: pacientes con deuda sin turno (usá {{nombre}})</label><textarea id="t-msg-deuda" style="min-height:70px;"></textarea></div>
+            <div class="field full"><label for="t-msg-reactivar">WhatsApp: pacientes para reactivar (usá {{nombre}})</label><textarea id="t-msg-reactivar" style="min-height:70px;"></textarea></div>
           </div>
           <button class="btn btn-primary" id="t-guardar">Guardar textos</button>
           <div class="msg" id="t-msg"></div>
@@ -1066,14 +1068,15 @@
     }).join('') || '<tr><td colspan="5">No hay nadie sin ficha.</td></tr>';
   }
   // ---- Pacientes para contactar (deuda reciente sin turno / reactivar) ----
+  const MSG_DEUDA_DEFAULT = 'Hola {{nombre}}, te escribimos del consultorio del Od. Franco Vinzón. ¿Querés que te agendemos un próximo turno?';
+  const MSG_REACTIVAR_DEFAULT = 'Hola {{nombre}}, te escribimos del consultorio del Od. Franco Vinzón. Hace un tiempo que no te vemos, ¿querés agendar un control?';
+  let plantillasSeg = { deuda: MSG_DEUDA_DEFAULT, react: MSG_REACTIVAR_DEFAULT };
   function linkWhatsapp(tel, nombre, tipo) {
     let d = String(tel || '').replace(/\D/g, '').replace(/^0+/, '');
     if (d.length < 10) return '';
     if (!d.startsWith('54')) d = '549' + d.replace(/^15/, '');
     const primero = String(nombre || '').trim().split(/\s+/)[0] || '';
-    const txt = tipo === 'deuda'
-      ? `Hola ${primero}, te escribimos del consultorio del Od. Franco Vinzón. ¿Querés que te agendemos un próximo turno?`
-      : `Hola ${primero}, te escribimos del consultorio del Od. Franco Vinzón. Hace un tiempo que no te vemos, ¿querés agendar un control?`;
+    const txt = (tipo === 'deuda' ? plantillasSeg.deuda : plantillasSeg.react).replaceAll('{{nombre}}', primero);
     return `<a class="btn btn-outline" style="padding:4px 10px;font-size:12px;" target="_blank" rel="noopener" href="https://wa.me/${d}?text=${encodeURIComponent(txt)}">WhatsApp</a>`;
   }
   async function cargarSeguimiento() {
@@ -1081,6 +1084,10 @@
     const tReact = document.querySelector('#seg-react tbody');
     tDeuda.innerHTML = tReact.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
     try {
+      try {
+        const t = await apiGet('textos');
+        plantillasSeg = { deuda: t.mensajeDeuda || MSG_DEUDA_DEFAULT, react: t.mensajeReactivar || MSG_REACTIVAR_DEFAULT };
+      } catch { /* queda el texto de siempre */ }
       const r = await apiGet('seguimiento', { dias: document.getElementById('seg-dias').value, meses: document.getElementById('seg-meses').value });
       if (!r.success) throw new Error(r.error || 'Sin datos.');
       const fecha = (iso) => iso ? iso.split('-').reverse().join('/') : '—';
@@ -1368,6 +1375,8 @@
       document.getElementById('t-whatsapp').value = t.whatsappTemplate || '';
       document.getElementById('t-direccion').value = t.direccion || '';
       document.getElementById('t-bienvenida').value = t.bienvenidaNuevoPaciente || '';
+      document.getElementById('t-msg-deuda').value = t.mensajeDeuda || MSG_DEUDA_DEFAULT;
+      document.getElementById('t-msg-reactivar').value = t.mensajeReactivar || MSG_REACTIVAR_DEFAULT;
     } catch (e) {
       if (e.message !== 'unauthorized') setMsg('t-msg', 'No se pudieron cargar los textos.', 'error');
     }
@@ -1379,6 +1388,8 @@
         whatsappTemplate: document.getElementById('t-whatsapp').value,
         direccion: document.getElementById('t-direccion').value,
         bienvenidaNuevoPaciente: document.getElementById('t-bienvenida').value,
+        mensajeDeuda: document.getElementById('t-msg-deuda').value,
+        mensajeReactivar: document.getElementById('t-msg-reactivar').value,
       });
       setMsg('t-msg', res.success ? 'Guardado.' : 'No se pudo guardar.', res.success ? 'ok' : 'error');
       if (res.success) toast('Textos actualizados');

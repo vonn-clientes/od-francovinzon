@@ -1334,6 +1334,7 @@ async function crearPacienteInterno({ nombre, apellido, campos = {} }) {
   // respuesta, así que un "fire and forget" acá se arriesgaría a cortarse a la mitad.
   await upsertPacienteConsolidado({
     telefono: datos.telefono, nombre, apellido, dni: datos.dni, fichaId: id, origen: 'ficha',
+    email: String(campos.email || '').trim(),
   });
 
   return { success: true, id, nombre, apellido };

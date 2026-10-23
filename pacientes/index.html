@@ -460,9 +460,32 @@
         <div class="field"><label for="np-apellido">Apellido *</label><input type="text" id="np-apellido"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label for="np-dni">DNI</label><input type="text" id="np-dni"></div>
-        <div class="field"><label for="np-telefono">Teléfono</label><input type="text" id="np-telefono"></div>
+        <div class="field"><label for="np-dni">DNI</label><input type="text" id="np-dni" inputmode="numeric"></div>
+        <div class="field"><label for="np-fnac">Fecha de nacimiento</label><input type="text" id="np-fnac" placeholder="dd/mm/aaaa"></div>
       </div>
+      <div class="field-row">
+        <div class="field"><label for="np-telefono">Teléfono</label><input type="text" id="np-telefono"></div>
+        <div class="field"><label for="np-email">Correo electrónico</label><input type="email" id="np-email" autocomplete="off"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="np-domicilio">Domicilio</label><input type="text" id="np-domicilio"></div>
+        <div class="field"><label for="np-localidad">Localidad</label><input type="text" id="np-localidad" list="localidades-lista" placeholder="Elegí o escribí otra" autocomplete="off"></div>
+      </div>
+      <div class="field">
+        <label>¿Es paciente particular o tiene obra social? *</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn-cancel np-cob" data-cob="particular" aria-pressed="false">Particular</button>
+          <button type="button" class="btn-cancel np-cob" data-cob="obra" aria-pressed="false">Tiene obra social</button>
+        </div>
+      </div>
+      <div id="np-obra-wrap" class="hidden">
+        <div class="field-row">
+          <div class="field"><label for="np-os">Obra social *</label><input type="text" id="np-os"></div>
+          <div class="field"><label for="np-afiliado">N° de afiliado</label><input type="text" id="np-afiliado"></div>
+          <div class="field"><label for="np-plan">Plan</label><input type="text" id="np-plan"></div>
+        </div>
+      </div>
+      <datalist id="localidades-lista"><option value="Concepción del Uruguay"><option value="Gualeguaychú"><option value="San José"><option value="Caseros"><option value="Urdinarrain"><option value="San Justo"><option value="Colón"><option value="Basavilbaso"><option value="Villa Elisa"><option value="Pronunciamiento"></datalist>
       <div class="dup-warning hidden" id="np-dup-warning">
         <div class="dup-warning-text">Ya existe una ficha con este DNI: <span id="np-dup-nombre"></span></div>
         <button class="btn-confirm" id="np-dup-abrir">Abrir ficha</button>
@@ -1486,6 +1509,12 @@
   });
   [npNombre, npApellido].forEach((el) => el.addEventListener('input', () => { telefonoAutocompletadoConsultado = false; }));
 
+  let npCob = '';
+  document.querySelectorAll('.np-cob').forEach((b) => b.addEventListener('click', () => {
+    npCob = b.dataset.cob;
+    document.querySelectorAll('.np-cob').forEach((x) => { const on = x === b; x.setAttribute('aria-pressed', String(on)); x.style.background = on ? 'var(--navy, #1E3A5F)' : ''; x.style.color = on ? '#fff' : ''; });
+    document.getElementById('np-obra-wrap').classList.toggle('hidden', npCob !== 'obra');
+  }));
   document.getElementById('np-guardar').addEventListener('click', async () => {
     const nombre = npNombre.value.trim();
     const apellido = npApellido.value.trim();
@@ -1495,6 +1524,8 @@
       npMsg.classList.remove('hidden');
       return;
     }
+    if (!npCob) { npMsg.textContent = 'Indicá si es particular o tiene obra social.'; npMsg.className = 'panel-msg error'; npMsg.classList.remove('hidden'); return; }
+    if (npCob === 'obra' && !document.getElementById('np-os').value.trim()) { npMsg.textContent = 'Escribí el nombre de la obra social.'; npMsg.className = 'panel-msg error'; npMsg.classList.remove('hidden'); return; }
     chequearDniEnNuevoPaciente();
     if (npDuplicadoActual) return; // ya se muestra el cartel "Abrir ficha", no se crea nada
     const btn = document.getElementById('np-guardar');
@@ -1503,7 +1534,14 @@
       const r = await apiPost({
         accion: 'crear',
         nombre, apellido,
-        campos: { dni: npDni.value.trim(), telefono: npTelefono.value.trim() },
+        campos: {
+          dni: npDni.value.trim(), telefono: npTelefono.value.trim(), email: document.getElementById('np-email').value.trim(),
+          fechaNacimiento: document.getElementById('np-fnac').value.trim(),
+          domicilio: document.getElementById('np-domicilio').value.trim(), localidad: document.getElementById('np-localidad').value.trim(),
+          obraSocial: npCob === 'particular' ? 'Particular' : document.getElementById('np-os').value.trim(),
+          nAfiliado: npCob === 'obra' ? document.getElementById('np-afiliado').value.trim() : '',
+          plan: npCob === 'obra' ? document.getElementById('np-plan').value.trim() : '',
+        },
       });
       if (r.success) {
         ocultarAnimado(panelNuevo);

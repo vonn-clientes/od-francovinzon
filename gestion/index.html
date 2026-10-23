@@ -357,6 +357,8 @@
   }
   .toast.show { opacity: 1; transform: translateY(0); }
 
+  .ficha-chip { display: inline-flex; align-items: center; margin-left: 8px; padding: 2px 9px; border-radius: 100px; border: 1.5px dashed var(--gold); background: transparent; color: #8a6a1f; font-size: 11px; font-weight: 700; line-height: 1.5; vertical-align: middle; white-space: nowrap; cursor: pointer; }
+  .ficha-chip:hover { background: rgba(200,160,60,.12); border-style: solid; }
   .nombre-link { cursor: pointer; text-decoration: underline; text-decoration-color: rgba(30,58,95,.25); text-underline-offset: 3px; }
   .nombre-link:hover { text-decoration-color: var(--gold); }
   /* Cartel chico "¿Querés imprimirlo?" después de crear/mover un turno — no
@@ -1757,7 +1759,6 @@
       botones.push(`<button class="add-tel-btn" data-action="agregar-tel" data-idx="${idx}">+ Agregar teléfono</button>`);
     }
     if (it.tipo !== 'bloqueo') {
-      if (!it.fichaId) botones.push(`<button class="add-tel-btn" data-action="asignar-ficha" data-idx="${idx}">Asignar ficha</button>`);
       botones.push(`<button class="icon-btn" data-action="mover" data-idx="${idx}" title="Editar turno">✏️</button>`);
       botones.push(`<button class="icon-btn" data-action="imprimir" data-idx="${idx}" title="Imprimir ticket">${PRINTER_ICON}</button>`);
       botones.push(`<button class="icon-btn trash" data-action="cancelar" data-idx="${idx}" title="Cancelar">${TRASH_ICON}</button>`);
@@ -1766,6 +1767,11 @@
 
     const nuevoBadge = esNuevo ? '<span class="badge-nuevo">✨ Nuevo paciente</span>' : '';
     const esCumple = it.tipo !== 'bloqueo' && currentDate === todayStr() && it.dni && cumpleanerosDniHoy.has(it.dni.replace(/\D/g, ''));
+    // "Sin ficha": chip chico pegado al nombre (no entre los botones de acción, que deben
+    // quedar alineados en todas las filas).
+    const fichaChip = it.tipo !== 'bloqueo' && !it.fichaId
+      ? `<button type="button" class="ficha-chip" data-action="asignar-ficha" data-idx="${idx}" title="Este paciente no tiene ficha">＋ Ficha</button>`
+      : '';
     const cumpleBadge = esCumple ? '<span class="cumple-badge">🎂 Cumpleaños</span>' : '';
     const telefonoLine = esNuevo && it.telefono ? `<div class="detalle-telefono">${escapeHtml(it.telefono)}</div>` : '';
     // Teléfono cargado que NO pasa la validación real de formato (mismo chequeo que
@@ -1788,7 +1794,7 @@
       <div class="row${esNuevo ? ' row-nuevo' : ''}" data-row-idx="${idx}">
         <div class="hora">${hora}</div>
         <div class="info">
-          <div class="nombre${it.fichaId ? ' nombre-link' : ''}"${it.fichaId ? ` data-action="datos" data-idx="${idx}" role="button" tabindex="0"` : ''}>${escapeHtml(it.title || '(sin título)')}${cumpleBadge}</div>
+          <div class="nombre${it.fichaId ? ' nombre-link' : ''}"${it.fichaId ? ` data-action="datos" data-idx="${idx}" role="button" tabindex="0"` : ''}>${escapeHtml(it.title || '(sin título)')}${cumpleBadge}${fichaChip}</div>
           <div class="detalle">${escapeHtml(desc)}</div>
           ${telefonoLine}
         </div>

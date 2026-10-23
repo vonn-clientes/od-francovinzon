@@ -131,6 +131,8 @@ export default async function handler(req, res) {
     // "Mis datos" (QR del paciente): público pero con token firmado que vale 3 h y abre
     // UNA sola ficha; solo expone/escribe los datos personales de lib/autoficha.js.
     if (req.method === 'GET' && req.query.modo === 'autoficha') return await autofichaLeer(req, res);
+    if (req.method === 'GET' && req.query.modo === 'datos-ficha') return await datosFichaLeer(req, res);
+    if (req.method === 'POST' && req.body?.accion === 'datos-guardar') return await datosFichaGuardar(req, res);
     if (req.method === 'POST' && req.body?.accion === 'autoficha-guardar') return await autofichaGuardar(req, res);
     if (req.method === 'POST' && req.body?.accion === 'autoficha-token') return await autofichaToken(req, res);
     if (req.method === 'GET' && req.query.modo === 'buscar-publico') {
@@ -788,6 +790,42 @@ async function autofichaGuardar(req, res) {
     console.error('[autoficha] guardado falló');
     return res.status(500).json({ ok: false, error: 'No se pudieron guardar los datos.' });
   }
+}
+// Editor de datos personales para la secretaria (/datosqr y /gestion): mismos campos que
+// "Mis datos", pero con GESTION_KEY y TODOS editables (también nombre, apellido y DNI).
+function fichaIdValido(id) { return /^[A-Za-z0-9_-]{20,80}$/.test(String(id || '')); }
+async function datosFichaLeer(req, res) {
+  if (!claveValida(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
+  const fichaId = String(req.query.fichaId || '');
+  if (!fichaIdValido(fichaId)) return res.status(400).json({ error: 'Ficha inválida.' });
+  try {
+    const actuales = vistaPublica({ campos: await leerCamposAutoficha(fichaId) });
+    const campos = CAMPOS_AUTOFICHA.map((c) => ({ clave: c.clave, etiqueta: c.etiqueta, tipo: c.tipo, autocomplete: c.autocomplete, valor: actuales[c.clave] ?? '', bloqueado: false }));
+    res.setHeader('Cache-Control', 'no-store, private');
+    return res.status(200).json({ ok: true, campos });
+  } catch { return res.status(500).json({ ok: false, error: 'No se pudieron cargar los datos.' }); }
+}
+async function datosFichaGuardar(req, res) {
+  if (!claveValida(req.body?.key)) return res.status(401).json({ error: 'unauthorized' });
+  const fichaId = String(req.body?.fichaId || '');
+  if (!fichaIdValido(fichaId)) return res.status(400).json({ error: 'Ficha inválida.' });
+  try {
+    const actuales = await leerCamposAutoficha(fichaId);
+    const { cambios, errores } = validarCambios(req.body?.cambios, actuales, { permitirBloqueados: true });
+    for (const { campo, valor } of cambios) {
+      if (campo !== 'telefono' && campo !== 'dni') continue;
+      const otra = campo === 'telefono'
+        ? await buscarPacienteConsolidadoPorTelefono(valor, { cache: true }).catch(() => null)
+        : await buscarPacienteConsolidadoPorDni(valor, { cache: true }).catch(() => null);
+      if (otra && otra.fichaId && otra.fichaId !== fichaId) errores[campo] = 'Ese dato ya figura en otra ficha.';
+    }
+    if (Object.keys(errores).length) return res.status(400).json({ ok: false, errores });
+    if (!cambios.length) return res.status(200).json({ ok: true, guardados: [] });
+    for (const { campo, valor } of cambios) await escribirCampoEnSheet(fichaId, campo, valor);
+    await espejarFichaBestEffort(fichaId);
+    logActividad({ tipo: 'datos-ficha', detalle: `Secretaria editó datos (${cambios.map((c) => c.campo).join(', ')})`, actor: 'gestion' }).catch(() => {});
+    return res.status(200).json({ ok: true, guardados: cambios.map((c) => c.campo) });
+  } catch { return res.status(500).json({ ok: false, error: 'No se pudieron guardar los datos.' }); }
 }
 async function autofichaToken(req, res) {
   if (!claveValida(req.body?.key)) return res.status(401).json({ error: 'unauthorized' });

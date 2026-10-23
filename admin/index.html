@@ -207,7 +207,7 @@
         <div class="card">
           <h2>Top deudores por monto</h2>
           <p class="hint" id="dash-deuda-completitud"></p>
-          <div class="table-wrap"><table id="dash-deudores-monto"><thead><tr><th>Paciente</th><th>Saldo</th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="dash-deudores-monto"><thead><tr><th>Paciente</th><th>Saldo en pesos</th><th>Saldo en dólares</th></tr></thead><tbody></tbody></table></div>
         </div>
         <div class="card">
           <h2>Top deudores por antigüedad de la deuda</h2>
@@ -281,7 +281,7 @@
           <p class="hint">Para escribirles por WhatsApp y ofrecerles un turno. Solo aparecen los que no tienen un turno futuro cargado.</p>
           <h3 style="font-size:14px;margin:10px 0 6px;">Con deuda reciente y sin turno próximo</h3>
           <p class="hint">Último pago hace menos de <select id="seg-dias"><option value="30">30 días</option><option value="60" selected>60 días</option><option value="90">90 días</option></select></p>
-          <div class="table-wrap"><table id="seg-deuda"><thead><tr><th>Paciente</th><th>Debe</th><th>Sin pagar</th><th>Última visita</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="seg-deuda"><thead><tr><th>Paciente</th><th>Saldo en pesos</th><th>Saldo en dólares</th><th>Sin pagar</th><th>Última visita</th><th></th></tr></thead><tbody></tbody></table></div>
           <h3 style="font-size:14px;margin:16px 0 6px;">Para reactivar (al día, sin venir hace tiempo)</h3>
           <p class="hint">Sin venir hace más de <select id="seg-meses"><option value="1">1 mes</option><option value="2">2 meses</option><option value="3" selected>3 meses</option><option value="6">6 meses</option></select></p>
           <div class="table-wrap"><table id="seg-react"><thead><tr><th>Paciente</th><th>Última visita</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -657,7 +657,7 @@
     // espera (pedido explícito, 2026-08-13 — antes parecía que no andaba nada).
     document.getElementById('dash-stats').innerHTML = '<p class="hint">Cargando métricas…</p>';
     document.getElementById('dash-bars').innerHTML = '';
-    document.querySelector('#dash-deudores-monto tbody').innerHTML = '<tr><td colspan="2">Cargando…</td></tr>';
+    document.querySelector('#dash-deudores-monto tbody').innerHTML = '<tr><td colspan="3">Cargando…</td></tr>';
     document.querySelector('#dash-deudores-antiguedad tbody').innerHTML = '<tr><td colspan="2">Cargando…</td></tr>';
     setMsg('dash-msg', '', '');
     try {
@@ -682,9 +682,9 @@
         `<div class="bar" style="height:${Math.max(2, Math.round((d.cantidad / max) * 116))}px" data-tooltip="${d.cantidad} turno${d.cantidad === 1 ? '' : 's'} — ${fmtFechaBarra(d.fecha)}"></div>`
       ).join('') || '<p class="hint">Sin turnos en este rango.</p>';
 
-      document.querySelector('#dash-deudores-monto tbody').innerHTML = m.totalPacientesConSaldo == null ? '<tr><td colspan="2">Calculando saldos…</td></tr>' : m.topDeudoresMonto.map((d) =>
-        `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>$${Number(d.saldo).toLocaleString('es-AR')}</td></tr>`
-      ).join('') || '<tr><td colspan="2">Sin deudores.</td></tr>';
+      document.querySelector('#dash-deudores-monto tbody').innerHTML = m.totalPacientesConSaldo == null ? '<tr><td colspan="3">Calculando saldos…</td></tr>' : m.topDeudoresMonto.map((d) =>
+        `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>${d.saldo > 0 ? '$' + Number(d.saldo).toLocaleString('es-AR') : '—'}</td><td>${d.saldoUsd > 0 ? 'US$ ' + Number(d.saldoUsd).toLocaleString('es-AR') : '—'}</td></tr>`
+      ).join('') || '<tr><td colspan="3">Sin deudores.</td></tr>';
 
       document.querySelector('#dash-deudores-antiguedad tbody').innerHTML = m.totalPacientesConSaldo == null ? '<tr><td colspan="2">Calculando saldos…</td></tr>' : m.topDeudoresAntiguedad.map((d) =>
         `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>${d.dias} días</td></tr>`
@@ -714,8 +714,8 @@
     const porcentaje = m.porcentajeConDeuda ?? (m.totalPacientesConSaldo ? Math.round((m.conDeuda / m.totalPacientesConSaldo) * 100) : null);
     if (tile) tile.querySelector('.num').textContent = porcentaje == null ? 'N/D' : `${porcentaje}%`;
     document.querySelector('#dash-deudores-monto tbody').innerHTML = (m.topDeudoresMonto || []).map((d) =>
-      `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>$${Number(d.saldo).toLocaleString('es-AR')}</td></tr>`
-    ).join('') || '<tr><td colspan="2">Sin deudores.</td></tr>';
+      `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>${d.saldo > 0 ? '$' + Number(d.saldo).toLocaleString('es-AR') : '—'}</td><td>${d.saldoUsd > 0 ? 'US$ ' + Number(d.saldoUsd).toLocaleString('es-AR') : '—'}</td></tr>`
+    ).join('') || '<tr><td colspan="3">Sin deudores.</td></tr>';
     document.querySelector('#dash-deudores-antiguedad tbody').innerHTML = (m.topDeudoresAntiguedad || []).map((d) =>
       `<tr><td>${escapeHtmlAdmin(d.nombre)}</td><td>${d.dias} días</td></tr>`
     ).join('') || '<tr><td colspan="2">Sin datos.</td></tr>';
@@ -1082,7 +1082,7 @@
   async function cargarSeguimiento() {
     const tDeuda = document.querySelector('#seg-deuda tbody');
     const tReact = document.querySelector('#seg-react tbody');
-    tDeuda.innerHTML = tReact.innerHTML = '<tr><td colspan="5">Cargando…</td></tr>';
+    tDeuda.innerHTML = tReact.innerHTML = '<tr><td colspan="6">Cargando…</td></tr>';
     try {
       try {
         const t = await apiGet('textos');
@@ -1092,8 +1092,8 @@
       if (!r.success) throw new Error(r.error || 'Sin datos.');
       const fecha = (iso) => iso ? iso.split('-').reverse().join('/') : '—';
       tDeuda.innerHTML = r.deudaSinTurno.map((p) =>
-        `<tr><td>${escapeHtmlAdmin(p.nombre)}</td><td>$${Number(p.saldo).toLocaleString('es-AR')}</td><td>${p.diasSinPago ?? '—'} días</td><td>${fecha(p.ultimaVisita)}</td><td>${linkWhatsapp(p.telefono, p.nombre, 'deuda')}</td></tr>`
-      ).join('') || '<tr><td colspan="5">Nadie para contactar con esos filtros.</td></tr>';
+        `<tr><td>${escapeHtmlAdmin(p.nombre)}</td><td>${p.saldo > 0 ? '$' + Number(p.saldo).toLocaleString('es-AR') : '—'}</td><td>${p.saldoUsd > 0 ? 'US$ ' + Number(p.saldoUsd).toLocaleString('es-AR') : '—'}</td><td>${p.diasSinPago ?? '—'} días</td><td>${fecha(p.ultimaVisita)}</td><td>${linkWhatsapp(p.telefono, p.nombre, 'deuda')}</td></tr>`
+      ).join('') || '<tr><td colspan="6">Nadie para contactar con esos filtros.</td></tr>';
       tReact.innerHTML = r.paraReactivar.map((p) =>
         `<tr><td>${escapeHtmlAdmin(p.nombre)}</td><td>${fecha(p.ultimaVisita)}</td><td>${linkWhatsapp(p.telefono, p.nombre, 'react')}</td></tr>`
       ).join('') || '<tr><td colspan="3">Nadie para reactivar con ese filtro.</td></tr>';

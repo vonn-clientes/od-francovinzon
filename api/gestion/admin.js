@@ -1119,7 +1119,8 @@ async function leerProximosTurnosPersonas(dias) {
     const dni = extraerDni(ev.description);
     const telefono = extraerTelefono(ev.description);
     const nombre = (ev.summary || '').trim();
-    const ya = out.find((t) => (dni && normalizarDni(t.dni) === normalizarDni(dni)) || (telefono && normalizarTelefonoMapeo(t.telefono) === normalizarTelefonoMapeo(telefono)) || (!dni && !telefono && t.nombre === nombre));
+    const ya = out.find((t) => (dni && t.dni ? normalizarDni(t.dni) === normalizarDni(dni)
+      : (telefono && normalizarTelefonoMapeo(t.telefono) === normalizarTelefonoMapeo(telefono) && t.nombre === nombre) || (!dni && !telefono && t.nombre === nombre)));
     if (ya) continue;
     out.push({ nombre, dni, telefono, start: new Date(ev.start.dateTime).toISOString() });
   }
@@ -1171,7 +1172,14 @@ async function getSinFicha(req, res) {
   });
   const claveDni = (v) => normalizarDni(v);
   const claveTel = (v) => normalizarTelefonoMapeo(v);
-  const turnoDe = (dni, tel) => proximos.find((t) => (claveDni(dni) && claveDni(t.dni) === claveDni(dni)) || (claveTel(tel) && claveTel(t.telefono) === claveTel(tel)));
+  // Identidad: el DNI manda. El teléfono solo cuenta si alguno de los dos no tiene DNI
+  // (familiares comparten teléfono: no son la misma persona si los DNI son distintos).
+  const mismaPersona = (a, b) => {
+    const da = claveDni(a.dni), db = claveDni(b.dni);
+    if (da && db) return da === db;
+    return !!claveTel(a.telefono) && claveTel(a.telefono) === claveTel(b.telefono);
+  };
+  const turnoDe = (dni, tel) => proximos.find((t) => mismaPersona({ dni, telefono: tel }, t));
   const sinFicha = filas
     .filter((f) => !f.fichaId)
     .map((f) => ({
@@ -1182,16 +1190,14 @@ async function getSinFicha(req, res) {
       proximoTurno: turnoDe(f.dni, f.telefono)?.start || '',
     }));
   // Personas con turno próximo que NO están en la planilla (o están con ficha → se omiten).
-  const conFichaDni = new Set(filas.filter((f) => f.fichaId && claveDni(f.dni)).map((f) => claveDni(f.dni)));
-  const conFichaTel = new Set(filas.filter((f) => f.fichaId && claveTel(f.telefono)).map((f) => claveTel(f.telefono)));
-  const enPlanilla = (t) => filas.some((f) => (claveDni(t.dni) && claveDni(f.dni) === claveDni(t.dni)) || (claveTel(t.telefono) && claveTel(f.telefono) === claveTel(t.telefono)));
+  const enPlanilla = (t) => filas.some((f) => mismaPersona(t, f));
+  const conFicha = (t) => filas.some((f) => f.fichaId && mismaPersona(t, f));
   const virtuales = [];
   let sinDatosClave = 0;
   for (const t of proximos) {
     if (!claveDni(t.dni) && !claveTel(t.telefono)) { sinDatosClave += 1; continue; }
-    if ((claveDni(t.dni) && conFichaDni.has(claveDni(t.dni))) || (claveTel(t.telefono) && conFichaTel.has(claveTel(t.telefono)))) continue;
-    if (enPlanilla(t)) continue;
-    if (virtuales.some((v) => (claveDni(t.dni) && claveDni(v.dni) === claveDni(t.dni)) || (claveTel(t.telefono) && claveTel(v.telefono) === claveTel(t.telefono)))) continue;
+    if (conFicha(t) || enPlanilla(t)) continue;
+    if (virtuales.some((v) => mismaPersona(t, v))) continue;
     const persona = { nombre: t.nombre, apellido: '', dni: t.dni, telefono: t.telefono };
     virtuales.push({
       virtual: true, fila: 0, nombre: t.nombre, dni: t.dni, telefono: t.telefono,
@@ -1225,10 +1231,15 @@ async function postAsignarFicha(req, res) {
   const v = req.body.virtual;
   if (v && (v.dni || v.telefono)) {
     // Persona con turno que aún no está en la planilla: se crea la fila y se asigna.
-    await upsertPacienteConsolidado({ telefono: v.telefono, nombre: v.nombre, apellido: '', dni: v.dni, origen: 'turno' });
+    const previas = await listarPacientesConsolidados();
+    const dniV = normalizarDni(v.dni), telV = normalizarTelefonoMapeo(v.telefono);
+    // Si el teléfono ya es de otra persona (otro DNI, p. ej. un familiar), no se usa:
+    // el upsert fusionaría las dos filas y pisaría el DNI de la otra.
+    const telOcupado = dniV && telV && previas.some((f) => normalizarTelefonoMapeo(f.telefono) === telV && normalizarDni(f.dni) !== dniV);
+    await upsertPacienteConsolidado({ telefono: telOcupado ? '' : v.telefono, nombre: v.nombre, apellido: '', dni: v.dni, origen: 'turno' });
     const filas = await listarPacientesConsolidados();
-    const creada = filas.find((f) => (normalizarDni(v.dni) && normalizarDni(f.dni) === normalizarDni(v.dni))
-      || (normalizarTelefonoMapeo(v.telefono) && normalizarTelefonoMapeo(f.telefono) === normalizarTelefonoMapeo(v.telefono)));
+    const creada = dniV ? filas.find((f) => normalizarDni(f.dni) === dniV)
+      : filas.find((f) => telV && normalizarTelefonoMapeo(f.telefono) === telV);
     if (!creada) return res.status(500).json({ success: false, error: 'No se pudo registrar a la persona. Probá de nuevo.' });
     fila = creada.fila;
   }

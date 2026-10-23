@@ -1233,15 +1233,20 @@ async function postAsignarFicha(req, res) {
     // Persona con turno que aún no está en la planilla: se crea la fila y se asigna.
     const previas = await listarPacientesConsolidados();
     const dniV = normalizarDni(v.dni), telV = normalizarTelefonoMapeo(v.telefono);
+    if (dniV && previas.some((f) => f.fichaId && f.fichaId !== req.body.fichaId && normalizarDni(f.dni) === dniV)) {
+      return res.status(400).json({ success: false, error: 'El DNI de esta persona ya pertenece a otra ficha.' });
+    }
     // Si el teléfono ya es de otra persona (otro DNI, p. ej. un familiar), no se usa:
     // el upsert fusionaría las dos filas y pisaría el DNI de la otra.
     const telOcupado = dniV && telV && previas.some((f) => normalizarTelefonoMapeo(f.telefono) === telV && normalizarDni(f.dni) !== dniV);
-    await upsertPacienteConsolidado({ telefono: telOcupado ? '' : v.telefono, nombre: v.nombre, apellido: '', dni: v.dni, origen: 'turno' });
-    const filas = await listarPacientesConsolidados();
-    const creada = dniV ? filas.find((f) => normalizarDni(f.dni) === dniV)
-      : filas.find((f) => telV && normalizarTelefonoMapeo(f.telefono) === telV);
-    if (!creada) return res.status(500).json({ success: false, error: 'No se pudo registrar a la persona. Probá de nuevo.' });
-    fila = creada.fila;
+    // Un solo paso (rápido): se crea la fila ya con su ficha.
+    await upsertPacienteConsolidado({ telefono: telOcupado ? '' : v.telefono, nombre: v.nombre, apellido: '', dni: v.dni, fichaId: req.body.fichaId, origen: 'ficha' });
+    await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${v.nombre} asignado a ficha ${req.body.fichaId}`, actor: 'admin' });
+    // La fila hace falta para poder "Cancelar asignación".
+    const despues = await listarPacientesConsolidados();
+    const creada = dniV ? despues.find((f) => normalizarDni(f.dni) === dniV) : despues.find((f) => telV && normalizarTelefonoMapeo(f.telefono) === telV);
+    if (!creada || creada.fichaId !== req.body.fichaId) return res.status(500).json({ success: false, error: 'No se pudo confirmar la asignación. Probá de nuevo.' });
+    return res.status(200).json({ success: true, fila: creada.fila });
   }
   const r = await asignarFilaAFicha(fila, req.body.fichaId);
   if (!r.ok) return res.status(400).json({ success: false, error: r.error });

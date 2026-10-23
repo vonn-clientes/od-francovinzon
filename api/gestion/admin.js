@@ -96,6 +96,7 @@ export default async function handler(req, res) {
       if (recurso === 'export-perfil-anonimo') return await conError(exportPerfilPacientes, req, res);
       if (recurso === 'export-pacientes-completo') return await conError(exportPacientesCompleto, req, res);
       if (recurso === 'sin-ficha') return await conError(getSinFicha, req, res);
+      if (recurso === 'seguimiento') return await conError(getSeguimiento, req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
@@ -1345,6 +1346,16 @@ async function postDesasignarFicha(req, res) {
   if (!r.ok) return res.status(400).json({ success: false, error: r.error });
   await logActividad({ tipo: 'desasignar_ficha', detalle: `Asignación cancelada: ${r.nombre}`, actor: 'admin' });
   res.status(200).json({ success: true });
+}
+
+// Pacientes a contactar: con deuda reciente y sin turno futuro, y los que hace tiempo no vienen.
+// Sale de Supabase (fichas + turnos espejados); no toca Google.
+async function getSeguimiento(req, res) {
+  const meses = Math.min(Math.max(parseInt(req.query.meses, 10) || 3, 1), 24);
+  const dias = Math.min(Math.max(parseInt(req.query.dias, 10) || 60, 7), 365);
+  const r = await rpcAdmin('consultorio_admin_seguimiento', { p_meses_inactivo: meses, p_dias_deuda: dias }, { timeoutMs: 8000 });
+  if (!r) return res.status(200).json({ success: false, error: 'No se pudo consultar Supabase.' });
+  res.status(200).json({ success: true, meses, dias, deudaSinTurno: r.deudaSinTurno || [], paraReactivar: r.paraReactivar || [] });
 }
 
 async function getMetricasAvanzadas(req, res) {

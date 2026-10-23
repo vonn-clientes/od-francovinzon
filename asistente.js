@@ -35,7 +35,8 @@
   const nota = el('div', 'asis-note', 'Es un asistente virtual: no reemplaza una consulta. No compartas datos personales ni de salud por acá.');
   const foot = el('form', 'asis-foot');
   const input = el('input', 'asis-input'); input.type = 'text'; input.maxLength = 500; input.placeholder = 'Escribile a ' + NOMBRE + '…'; input.setAttribute('aria-label', 'Tu consulta'); input.autocomplete = 'off';
-  const enviar = el('button', 'asis-send', 'Enviar'); enviar.type = 'submit';
+  const enviar = el('button', 'asis-send'); enviar.type = 'submit'; enviar.setAttribute('aria-label', 'Enviar');
+  enviar.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5.5 11.5 12 5l6.5 6.5"/></svg>';
   foot.append(input, enviar);
   const wa = el('a', 'asis-wa', 'Prefiero hablar por WhatsApp'); wa.href = WA; wa.target = '_blank'; wa.rel = 'noopener';
   panel.append(head, body, nota, foot);

@@ -18,6 +18,7 @@
     .field{margin:0 0 18px}.field label{display:block;font-weight:700;margin-bottom:7px;color:var(--navy)}input{width:100%;min-height:56px;padding:12px 14px;border:2px solid #c9c3b5;border-radius:12px;background:#fff;color:var(--text);font:inherit;font-size:18px}input:focus{outline:3px solid #d4a24c66;border-color:#9a6c1e}input:disabled{background:#f1f0ed;color:#45433e;border-color:#ddd8ce;opacity:1}.locked{font-size:15px;color:var(--muted);margin:6px 0 0}
     button{font:700 18px Inter,sans-serif;min-height:58px;border:0;border-radius:13px;padding:14px 20px;background:var(--navy);color:white;cursor:pointer;width:100%;margin-top:8px}button:hover{background:#294d78}button:focus-visible{outline:4px solid var(--gold);outline-offset:3px}button:disabled{opacity:.65;cursor:wait}.retry{background:white;color:var(--navy);border:2px solid var(--navy)}.notice{padding:15px;border-radius:12px;background:#f7f4ec;color:var(--text)}.error{color:var(--red);font-size:16px;font-weight:600;margin:6px 0 14px}.status{text-align:center;padding:30px 4px}.status p{font-size:18px;color:var(--muted)}[hidden]{display:none!important}
     @media(min-width:560px){main{padding-top:48px}.card{padding:36px}.brand{margin-bottom:32px}}
+  .cob-opts{display:flex;gap:10px;flex-wrap:wrap}.cob-op{display:flex;align-items:center;gap:10px;flex:1 1 140px;min-height:56px;padding:10px 14px;border:2px solid #c9c3b5;border-radius:12px;background:#fff;font-weight:600;cursor:pointer}.cob-op input{width:22px;height:22px;min-height:0;margin:0;accent-color:#1E3A5F}.cob-op:has(input:checked){border-color:#1E3A5F;background:#eef3fa}
   </style>
 </head>
 <body>
@@ -35,6 +36,37 @@
   <script>
     (() => {
       const token = new URLSearchParams(location.search).get('t') || '';
+
+  // ===== COBERTURA: particular u obra social =====
+  // Pregunta primero cómo se atiende. "Particular" oculta obra social, afiliado y plan y
+  // guarda obraSocial = PARTICULAR (lo que ya usan las fichas). "Con obra social" los muestra.
+  // Nunca borra datos: si ya tenía afiliado/plan y marca Particular, solo se ocultan.
+  function aplicarCobertura(cont){
+    const q=(n)=>cont.querySelector('input[name="'+n+'"]');
+    const os=q('obraSocial'),af=q('nAfiliado'),pl=q('plan'); if(!os||!af||!pl) return;
+    const wOs=os.closest('.field'),wAf=af.closest('.field'),wPl=pl.closest('.field');
+    const original=os.value.trim(), esPart=/^particular$/i.test(original);
+    const box=document.createElement('div'); box.className='field cobertura';
+    box.innerHTML='<label id="cob-l">¿Cómo te atendés?</label><div class="cob-opts" role="radiogroup" aria-labelledby="cob-l"><label class="cob-op"><input type="radio" name="cobertura" value="particular"><span>Particular</span></label><label class="cob-op"><input type="radio" name="cobertura" value="os"><span>Con obra social</span></label></div>';
+    wOs.before(box);
+    const mostrar=(v)=>{ const ver=v==='os'; wOs.style.display=wAf.style.display=wPl.style.display=ver?'':'none'; };
+    const elegir=(v)=>{
+      mostrar(v);
+      if(v==='particular'&&!/^particular$/i.test(os.value.trim())) os.value='PARTICULAR';
+      if(v==='os'&&/^particular$/i.test(os.value.trim())) os.value='';
+    };
+    box.querySelectorAll('input').forEach((r)=>r.addEventListener('change',()=>elegir(r.value)));
+    const ini=esPart?'particular':(original?'os':'');
+    if(ini){ box.querySelector('input[value="'+ini+'"]').checked=true; mostrar(ini); } else mostrar('');
+    cont.dataset.cobOriginal=original;
+  }
+  // Antes de guardar: si eligió "Con obra social" pero dejó la obra social vacía, se restaura
+  // el valor original (para no borrar PARTICULAR por accidente).
+  function cobFix(cont){
+    const os=cont.querySelector('input[name="obraSocial"]'); if(!os) return;
+    const sel=cont.querySelector('input[name="cobertura"]:checked');
+    if(sel&&sel.value==='os'&&!os.value.trim()) os.value=cont.dataset.cobOriginal||'';
+  }
       const estados = ['loading','expired','network','form-card','done'];
       const mostrar = (id) => estados.forEach((e) => { document.getElementById(e).hidden = e !== id; });
       const inputFor = (campo) => {
@@ -57,12 +89,12 @@
           if (r.status === 410 || data.motivo === 'expirado' || data.error === 'expirado') { mostrar('expired'); return; }
           if (!r.ok || !data.ok || !Array.isArray(data.campos)) throw new Error('respuesta');
           document.getElementById('greeting').textContent = data.saludo || 'Revisá tus datos y completá lo que falte.';
-          const fields = document.getElementById('fields'); fields.replaceChildren(...data.campos.map(inputFor)); mostrar('form-card');
+          const fields = document.getElementById('fields'); fields.replaceChildren(...data.campos.map(inputFor)); aplicarCobertura(fields); mostrar('form-card');
         } catch { mostrar('network'); }
       }
       document.getElementById('retry').addEventListener('click', cargar);
       document.getElementById('form').addEventListener('submit', async (event) => {
-        event.preventDefault(); const button = document.getElementById('save'), error = document.getElementById('form-error'); error.textContent = '';
+        event.preventDefault(); cobFix(document.getElementById('fields')); const button = document.getElementById('save'), error = document.getElementById('form-error'); error.textContent = '';
         const cambios = {}; document.querySelectorAll('#fields input:not(:disabled)').forEach((input) => { if (input.value.trim() !== input.dataset.original.trim()) cambios[input.name] = input.value; });
         button.disabled = true; button.textContent = 'Guardando…';
         try {

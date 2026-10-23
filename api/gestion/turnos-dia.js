@@ -16,7 +16,9 @@ export default async function handler(req, res) {
   try {
     const dateStr = req.query.date;
     const dayStart = toArgDate(dateStr, '00:00');
-    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60000);
+    // `dias` (opcional, 1-31): para /datosqr, que lista los próximos turnos de varios días.
+    const dias = Math.min(31, Math.max(1, parseInt(req.query.dias || '1', 10) || 1));
+    const dayEnd = new Date(dayStart.getTime() + dias * 24 * 60 * 60000);
 
     const calendar = getCalendarClient();
 
@@ -26,12 +28,14 @@ export default async function handler(req, res) {
         timeMin: dayStart.toISOString(),
         timeMax: dayEnd.toISOString(),
         singleEvents: true,
+        maxResults: 2500,
       })),
       conReintentos(() => calendar.events.list({
         calendarId: SOBRETURNOS_CALENDAR_ID,
         timeMin: dayStart.toISOString(),
         timeMax: dayEnd.toISOString(),
         singleEvents: true,
+        maxResults: 2500,
       })),
     ]);
 

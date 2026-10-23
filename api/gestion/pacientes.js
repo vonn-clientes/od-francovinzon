@@ -34,7 +34,7 @@ import { Readable } from 'node:stream';
 import crypto from 'node:crypto';
 import { logActividad } from '../../lib/adminConfig.js';
 import { buscarPacienteConsolidadoPorTelefono, buscarPacienteConsolidadoPorDni } from '../../lib/pacientesConsolidados.js';
-import { upsertPacienteConsolidado, actualizarPacienteConsolidado, listarPacientesConsolidados, asignarFilaAFicha, PACIENTES_CONSOLIDADOS_NAME } from '../../lib/pacientesConsolidados.js';
+import { upsertPacienteConsolidado, actualizarPacienteConsolidado, listarPacientesConsolidados, asignarFilaAFicha, asignarPersonaNuevaAFicha, PACIENTES_CONSOLIDADOS_NAME } from '../../lib/pacientesConsolidados.js';
 // Confirmación automática de turnos por movimientos (pedido 2026-08-25, ver
 // lib/confirmarTurnosPorMovimiento.js): al guardar/editar un movimiento con fecha, si ese
 // paciente tiene un turno ese día, queda "Confirmado: Sí". Best-effort, nunca rompe el
@@ -267,6 +267,12 @@ async function despacharPostOriginal(req, res) {
   if (a === 'fusionar') return fusionarPacientes(req, res);
   if (a === 'completar-telefono-turno') return completarTelefonoTurno(req, res);
   if (a === 'confirmar-match') return confirmarMatch(req, res);
+  if (a === 'asignar-turno-a-ficha' && req.body.virtual) {
+    // Persona de un turno que aún no está en la planilla consolidada (botón "Asignar ficha" de /gestion).
+    const v = req.body.virtual;
+    const r = await asignarPersonaNuevaAFicha({ nombre: v.nombre, dni: v.dni, telefono: v.telefono, fichaId: req.body.fichaId });
+    return res.status(r.ok ? 200 : 400).json({ success: r.ok, message: r.error, fila: r.fila });
+  }
   if (a === 'asignar-turno-a-ficha') { const r = await asignarFilaAFicha(req.body.fila, req.body.fichaId); return res.status(r.ok ? 200 : 400).json({ success: r.ok, message: r.error, nombre: r.nombre }); }
   const handlers = { 'movimiento-agregar': movimientoAgregar, 'movimiento-editar': movimientoEditar, 'movimiento-anular': movimientoAnular, 'movimiento-limpiar': movimientoLimpiar, 'prestacion-agregar': prestacionAgregar, 'prestacion-editar': prestacionEditar, 'prestacion-eliminar': prestacionEliminar };
   if (handlers[a]) return handlers[a](req, res);

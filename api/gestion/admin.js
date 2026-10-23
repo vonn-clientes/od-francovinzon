@@ -1104,8 +1104,11 @@ function resumirPacientesTotales(pacientes = {}) {
 // una por DNI/teléfono, con el turno más cercano. Para el panel "sin ficha".
 async function leerProximosTurnosPersonas(dias) {
   const calendar = getCalendarClient();
-  const timeMin = new Date().toISOString();
-  const timeMax = new Date(Date.now() + dias * 86400000).toISOString();
+  // Desde las 00:00 de HOY (hora Argentina), para incluir también los turnos de hoy ya pasados.
+  const hoyArg = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const inicio = toArgDate(hoyArg, '00:00');
+  const timeMin = inicio.toISOString();
+  const timeMax = new Date(inicio.getTime() + dias * 86400000).toISOString();
   const [a, b] = await Promise.all([CALENDAR_ID, SOBRETURNOS_CALENDAR_ID].map((calendarId) =>
     conReintentos(() => calendar.events.list({ calendarId, timeMin, timeMax, singleEvents: true, orderBy: 'startTime', maxResults: 2500 }))));
   const evs = [...(a.data.items || []), ...(b.data.items || [])]

@@ -19,6 +19,7 @@ import { avisarFallo } from '../../lib/alertas.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { conReintentos } from '../../lib/retry.js';
 import { debeUsarSupabaseAdmin, escanearFichasDesdeSupabase, rpcAdmin } from '../../lib/adminSupabase.js';
+import { calcularCuentas } from '../../lib/cuentaSaldo.js';
 import {
   getConfig, setConfig, obtenerHorariosConfig, obtenerReservaOnlinePausada, logActividad,
   leerActividadReciente, leerAlertasRecientes, leerConfigVariasRapido,
@@ -789,16 +790,28 @@ const TTL_DEUDA_MS = 120000;
 async function calcularDeuda(forzar) {
   if (!forzar && cacheDeuda && Date.now() - cacheDeuda.ts < TTL_DEUDA_MS) return cacheDeuda.valor;
   const escaneo = await escanearFichasAdmin(forzar);
-  const fichas = escaneo.fichas.map((f) => ({
-    nombre: `${parsearNombreArchivo(f.archivo).nombre} ${parsearNombreArchivo(f.archivo).apellido}`.trim(),
-    saldo: f.saldo, dias: f.diasSinPago,
-  }));
-  const conDeuda = fichas.filter((f) => f.saldo > 0).length;
+  // Saldos separados: pesos y dólares (cada movimiento tiene su moneda). Si la fuente no trae
+  // monedas (camino viejo de Google), todo el saldo cuenta como pesos.
+  const fichas = escaneo.fichas.map((f) => {
+    let saldoArs = f.saldo, saldoUsd = 0;
+    if (escaneo.origen === 'supabase') {
+      const c = calcularCuentas(f.movimientos);
+      saldoArs = Math.round(c.ARS.saldo * 100) / 100;
+      saldoUsd = Math.round(c.USD.saldo * 100) / 100;
+    }
+    return { nombre: `${parsearNombreArchivo(f.archivo).nombre} ${parsearNombreArchivo(f.archivo).apellido}`.trim(), saldo: saldoArs, saldoUsd, dias: f.diasSinPago };
+  });
+  const debe = (f) => f.saldo > 0 || f.saldoUsd > 0;
+  const conDeuda = fichas.filter(debe).length;
   const totalPacientesConSaldo = fichas.length;
   const fallidos = escaneo.fallidos;
-  const topDeudoresMonto = fichas.filter((f) => f.saldo > 0);
-  const topDeudoresAntiguedad = fichas.filter((f) => f.saldo > 0 && f.dias > 0);
-  topDeudoresMonto.sort((a, b) => b.saldo - a.saldo);
+  // Para ordenar, el dólar se pasa a pesos con la cotización blue más reciente (solo ordena).
+  let cotOrden = 0;
+  try { const h = await obtenerHistoricoDolarBlue(); cotOrden = h.porFecha.get(h.fechasOrdenadas[h.fechasOrdenadas.length - 1]) || 0; } catch { /* ordena solo por pesos */ }
+  const equivalente = (f) => Math.max(f.saldo, 0) + Math.max(f.saldoUsd, 0) * cotOrden;
+  const topDeudoresMonto = fichas.filter(debe);
+  const topDeudoresAntiguedad = fichas.filter((f) => debe(f) && f.dias > 0);
+  topDeudoresMonto.sort((a, b) => equivalente(b) - equivalente(a));
   topDeudoresAntiguedad.sort((a, b) => b.dias - a.dias);
   const valor = { conDeuda, totalPacientesConSaldo, totalFichas: escaneo.total, fallidos, topDeudoresMonto, topDeudoresAntiguedad,
     ...(fallidos ? { errorLectura: escaneo.ultimoError } : {}) };

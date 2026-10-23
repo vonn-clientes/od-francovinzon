@@ -13,7 +13,7 @@ test('filasAEscaneo replica la forma del escaneo de Google', () => {
   assert.equal(e.total, 1); assert.equal(e.fallidos, 0);
   assert.equal(e.fichas[0].saldo, 45000); assert.equal(e.fichas[0].diasSinPago, 16);
   assert.equal(e.fichas[0].archivo, 'Iara Barreto - 47.782.165 - Ficha');
-  assert.deepEqual(Object.keys(e.fichas[0].movimientos[0]), ['fecha', 'tratamiento', 'debe', 'haber', 'saldo', 'formaPago']);
+  assert.deepEqual(Object.keys(e.fichas[0].movimientos[0]), ['fecha', 'tratamiento', 'debe', 'haber', 'saldo', 'formaPago', 'monedaDebe', 'monedaHaber', 'aplicaA', 'cotizacion']);
 });
 
 test('días sin pago absurdos (>10 años) se descartan igual que antes', () => {
@@ -31,4 +31,14 @@ test('escanearFichasDesdeSupabase falla si no hay fichas o responde error', asyn
 test('debeUsarSupabaseAdmin exige la bandera y las credenciales', () => {
   assert.equal(debeUsarSupabaseAdmin({ SUPABASE_READS: '1', SUPABASE_URL: 'u', SUPABASE_SERVICE_KEY: 'k' }), true);
   assert.equal(debeUsarSupabaseAdmin({ SUPABASE_READS: '0', SUPABASE_URL: 'u', SUPABASE_SERVICE_KEY: 'k' }), false);
+});
+
+test('los saldos en pesos y en dólares se calculan por separado', async () => {
+  const { calcularCuentas } = await import('../lib/cuentaSaldo.js');
+  const c = calcularCuentas([
+    { debe: '$100.000,00', haber: '$40.000,00', monedaDebe: 'ARS', monedaHaber: 'ARS' },
+    { debe: '$1.000,00', haber: '$300,00', monedaDebe: 'USD', monedaHaber: 'USD' },
+  ]);
+  assert.equal(c.ARS.saldo, 60000);
+  assert.equal(c.USD.saldo, 700);
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filasAEscaneo, escanearFichasDesdeSupabase, debeUsarSupabaseAdmin } from '../lib/adminSupabase.js';
+import { filasAEscaneo, escanearFichasDesdeSupabase, debeUsarSupabaseAdmin, rpcAdmin } from '../lib/adminSupabase.js';
 
 const fila = {
   id: 'f1', nombre: 'Iara', apellido: 'Barreto', dni: '47.782.165', fechaNacimiento: '31/01/2007', localidad: 'C Del U',
@@ -21,11 +21,25 @@ test('días sin pago absurdos (>10 años) se descartan igual que antes', () => {
 });
 
 test('escanearFichasDesdeSupabase falla si no hay fichas o responde error', async () => {
-  const env = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_KEY: 'k' };
-  await assert.rejects(escanearFichasDesdeSupabase({ env, fetchImpl: async () => ({ ok: true, json: async () => [] }) }));
-  await assert.rejects(escanearFichasDesdeSupabase({ env, fetchImpl: async () => ({ ok: false, status: 500 }) }));
+  const env = { SUPABASE_READS: '1', SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_KEY: 'k' };
+  assert.equal(await escanearFichasDesdeSupabase({ env, fetchImpl: async () => ({ ok: true, json: async () => [] }) }), null);
+  assert.equal(await escanearFichasDesdeSupabase({ env, fetchImpl: async () => ({ ok: false, status: 500 }) }), null);
   const ok = await escanearFichasDesdeSupabase({ env, fetchImpl: async () => ({ ok: true, json: async () => [fila] }) });
   assert.equal(ok.origen, 'supabase');
+});
+
+test('filasAEscaneo adapta ficha_json.campos y movimientos', () => {
+  const r = filasAEscaneo([{ id: 'sb-1', ficha_json: { campos: { nombre: 'Ana', apellido: 'Paz', dni: '123', localidad: 'Uru' }, financiero: { saldo: '$1.200,50', diasSinPagoTexto: '42' }, movimientos: [{ fecha: '1/2/2026', debe: '$2,00', monedaDebe: 'USD' }] } }]);
+  assert.equal(r.fichas[0].archivo.includes('Ana'), true);
+  assert.equal(r.fichas[0].saldo, 1200.5);
+  assert.equal(r.fichas[0].diasSinPago, 42);
+  assert.equal(r.fichas[0].movimientos[0].monedaDebe, 'USD');
+});
+
+test('rpcAdmin vuelve null ante fallo y no propaga excepciones', async () => {
+  const env = { SUPABASE_READS: '1', SUPABASE_URL: 'https://db.test', SUPABASE_SERVICE_KEY: 'secret' };
+  assert.equal(await rpcAdmin('consultorio_prueba', {}, { env, fetchImpl: async () => { throw new Error('offline'); } }), null);
+  assert.equal(await rpcAdmin('consultorio_prueba', {}, { env, fetchImpl: async () => ({ ok: false }) }), null);
 });
 
 test('debeUsarSupabaseAdmin exige la bandera y las credenciales', () => {

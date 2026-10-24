@@ -7,6 +7,7 @@ import './sincronizarTurnos.test.js';
 import './espejoTurnosBestEffort.test.js';
 import './lecturasSupabase.test.js';
 import './adminSupabase.test.js';
+import './tramo4Lecturas.test.js';
 import './escrituraPrimaria.test.js';
 import './fichaDesdeSupabase.test.js';
 import './busquedaSupabase.test.js';

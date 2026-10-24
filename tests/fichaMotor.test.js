@@ -38,3 +38,16 @@ test('prestacion-agregar recalcula los cinco derivados',()=>{const r=aplicarAcci
 test('prestacion-editar recalcula los cinco derivados',()=>{const f=base();f.prestacionesObraSocial=[{id:'p'}];const r=aplicarAccion(f,'prestacion-editar',{idRegistro:'p',fecha:'mañana',tratamiento:'control',codigo:'x'},{ahora});assert.equal(r.ficha.prestacionesObraSocial[0].codigo,'X');verificaDerivados(r);});
 test('prestacion-eliminar recalcula los cinco derivados',()=>{const f=base();f.prestacionesObraSocial=[{id:'p'}];const r=aplicarAccion(f,'prestacion-eliminar',{idRegistro:'p'},{ahora});assert.equal(r.ficha.prestacionesObraSocial.length,0);verificaDerivados(r);});
 test('asegurarIds determinístico',()=>{const f=base();f.movimientos=[{fila:18,fecha:'01/01/2020'}];assert.equal(asegurarIds(f).movimientos[0].id,asegurarIds(f).movimientos[0].id);});
+
+test('los registros nuevos reciben número de fila propio y consecutivo (sin Sheets)', async () => {
+  const { aplicarAccion } = await import('../lib/fichaMotor.js');
+  const { fichaAFilas } = await import('../lib/fichaAFilas.js');
+  let f = { id: 'x', campos: {}, movimientos: [{ fila: 18, id: 'a', fecha: '1/10/2026', tratamiento: 'A', debe: '$1,00', haber: '$0,00' }], prestacionesObraSocial: [] };
+  f = aplicarAccion(f, 'movimiento-agregar', { fecha: '2/10/2026', tratamiento: 'b', debe: 5 }).ficha;
+  f = aplicarAccion(f, 'movimiento-agregar', { fecha: '3/10/2026', tratamiento: 'c', haber: 2 }).ficha;
+  f = aplicarAccion(f, 'prestacion-agregar', { fecha: '3/10/2026', tratamiento: 'consulta', codigo: '0101' }).ficha;
+  assert.deepEqual(f.movimientos.map(m => m.fila), [18, 19, 20]);
+  assert.equal(f.prestacionesObraSocial[0].fila, 18);
+  const filas = fichaAFilas(f).movimientos.map(m => m.fila_origen);
+  assert.equal(new Set(filas).size, 3); assert.ok(filas.every(Number.isInteger));
+});

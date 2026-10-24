@@ -54,6 +54,7 @@ import { firmarToken, verificarToken, secretoAutoficha, CAMPOS_AUTOFICHA, vistaP
 import { ACCIONES_SOMBRA, leerAntesSombra, registrarSombra } from '../../lib/sombraEscrituras.js';
 import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
 import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
+import { aplicarEnSupabase, escrituraPrimariaActiva, ejecutarEscrituraPrimaria } from '../../lib/escrituraPrimaria.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -551,19 +552,31 @@ async function obtenerFicha(req, res) {
   const sheets = getPacientesSheetsClient();
   const drive = getPacientesDriveClient();
 
-  if (debeIntentarLecturaSupabase(process.env.SUPABASE_READS, process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)) {
+  if (debeIntentarLecturaSupabase(process.env.SUPABASE_READS, process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY) || escrituraPrimariaActiva(process.env)) {
     try {
       const respuesta = await conTimeout((async () => {
-        const { data: driveMeta } = await conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime' }));
         const cliente = crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY });
-        return { driveMeta, fila: await cliente.leerFicha(id) };
+        const fila = await cliente.leerFicha(id);
+        const primaria = escrituraPrimariaActiva(process.env);
+        const necesitaCompararDrive = !primaria || Number(fila?.ficha_version || 0) <= 0;
+        const driveMeta = necesitaCompararDrive
+          ? (await conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime' }))).data
+          : null;
+        return { driveMeta, fila };
       })(), 3000);
       const guardadaTime = Date.parse(respuesta.fila?.drive_modified_time || '');
       const actualTime = Date.parse(respuesta.driveMeta?.modifiedTime || '');
-      const guardada = fichaSupabaseFresca(respuesta.fila, respuesta.driveMeta?.modifiedTime);
+      const guardada = escrituraPrimariaActiva(process.env)
+        ? (Number(respuesta.fila?.ficha_version) > 0 ? (respuesta.fila?.ficha ?? respuesta.fila?.ficha_json ?? null) : fichaSupabaseFresca(respuesta.fila, respuesta.driveMeta?.modifiedTime))
+        : fichaSupabaseFresca(respuesta.fila, respuesta.driveMeta?.modifiedTime);
       if (guardada) {
         res.setHeader('X-Fuente', 'supabase');
-        return res.status(200).json({ ...guardada, driveModifiedTime: respuesta.driveMeta.modifiedTime });
+        const fichaConIds = {
+          ...guardada,
+          movimientos: (guardada.movimientos || []).map((x) => ({ ...x, idRegistro: x.idRegistro || x.id })),
+          prestacionesObraSocial: (guardada.prestacionesObraSocial || []).map((x) => ({ ...x, idRegistro: x.idRegistro || x.id })),
+        };
+        return res.status(200).json({ ...fichaConIds, driveModifiedTime: respuesta.driveMeta?.modifiedTime || guardada.driveModifiedTime || respuesta.fila?.drive_modified_time || null });
       }
       if (Number.isFinite(guardadaTime) && Number.isFinite(actualTime) && actualTime > guardadaTime) {
         void espejarFichaBestEffort(id).catch(() => {});
@@ -587,6 +600,42 @@ async function obtenerFicha(req, res) {
   ]);
   const ficha = construirRespuestaFicha({ id, driveModifiedTime: meta.data.modifiedTime, campos: campos.data.values || [], financiero: financiero.data.values || [], movRaw: movRaw.data.values || [], presRaw: presRaw.data.values || [], monedaFilas: monedaRaw.data.values || [] });
   res.status(200).json(ficha);
+}
+
+// Devuelve false solo cuando corresponde ejecutar el camino Google existente.
+async function intentarEscrituraFicha(id, accion, body, res, respuestaOk) {
+  let decision;
+  try {
+    decision = await ejecutarEscrituraPrimaria({
+      activa: escrituraPrimariaActiva(process.env),
+      aplicar: () => aplicarEnSupabase({ id, accion, body, ahora: new Date() }),
+      escribirGoogle: async () => null,
+    });
+  } catch { decision = { ruta: 'rechazada', resultado: { ok: false, motivo: 'ambiguo' } }; }
+  if (decision.ruta === 'google') return false;
+  const resultado = decision.resultado;
+  if (!resultado.ok) {
+    const mensaje = resultado.motivo === 'invalido' ? resultado.mensaje
+      : resultado.motivo === 'conflicto' ? 'La ficha cambió mientras se guardaba. Actualizá e intentá de nuevo.'
+        : 'No pudimos confirmar el guardado en Supabase. Reintentá en unos segundos.';
+    res.status(resultado.motivo === 'invalido' ? 400 : 503).json({ success: false, message: mensaje });
+    return true;
+  }
+  try {
+    const cliente = crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY });
+    const ficha = { ...resultado.ficha, fichaJson: resultado.ficha };
+    await conTimeout(cliente.sincronizarFicha(construirPayload(id, ficha, { driveModifiedTime: resultado.ficha.driveModifiedTime })), 2500);
+  } catch { /* La escritura primaria ya quedó confirmada; la sincronización derivada es best-effort. */ }
+  if (accion === 'movimiento-agregar' && (body.tratamiento || Number(body.debe) > 0 || Number(body.haber) > 0 || body.formaPago)) {
+    const fechaISO = fechaMovimientoAISO(body.fecha || '');
+    if (fechaISO) await confirmarTurnosDeFichaEnFecha({ fichaId: id, fechaISO }).catch(() => {});
+  } else if (accion === 'movimiento-editar' && body.confirmarAuto) {
+    const fechaISO = fechaMovimientoAISO(body.fecha || '');
+    if (fechaISO) await confirmarTurnosDeFichaEnFecha({ fichaId: id, fechaISO }).catch(() => {});
+  }
+  const payload = typeof respuestaOk === 'function' ? respuestaOk(resultado) : respuestaOk;
+  res.status(200).json(payload);
+  return true;
 }
 
 // Copia espejo de solo lectura de las fichas: vive acá porque necesita los clientes
@@ -1346,6 +1395,8 @@ async function actualizarCampo(req, res) {
     return res.status(400).json({ success: false, message: 'Campo inválido.' });
   }
 
+  if (await intentarEscrituraFicha(id, 'actualizar-campo', { campo, valor }, res, { success: true })) return;
+
   try {
     await escribirCampoEnSheet(id, campo, valor);
     res.status(200).json({ success: true });
@@ -1502,6 +1553,8 @@ async function movimientoAgregar(req, res) {
   // protegidos por el fix de primeraFilaLibre() sin necesitar migración.
   if (!id || !fecha || !String(fecha).trim()) return res.status(400).json({ success: false, message: 'Falta fecha.' });
 
+  if (await intentarEscrituraFicha(id, 'movimiento-agregar', { fecha, tratamiento, debe, haber, formaPago, ...moneda }, res, (r) => ({ success: true, idRegistro: r.cambios?.[0]?.id }))) return;
+
   const sheets = getPacientesSheetsClient();
   let fila;
   try {
@@ -1537,7 +1590,9 @@ async function movimientoAgregar(req, res) {
 async function movimientoEditar(req, res) {
   const { id, fila, fecha, tratamiento, debe, haber, formaPago, confirmarAuto, monedaDebe, monedaHaber, aplicaA, cotizacion } = req.body;
   const moneda = { monedaDebe, monedaHaber, aplicaA, cotizacion };
-  if (!id || !fila) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (!id || (!fila && !req.body.idRegistro)) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  const body = { fila, idRegistro: req.body.idRegistro, fecha, tratamiento, debe, haber, formaPago, monedaDebe, monedaHaber, aplicaA, cotizacion, confirmarAuto };
+  if (await intentarEscrituraFicha(id, 'movimiento-editar', body, res, { success: true })) return;
 
   try {
     await escribirMovimientoEnFila(id, fila, { fecha, tratamiento, debe, haber, formaPago, ...moneda });
@@ -1621,7 +1676,8 @@ async function anularMovimientoEnSheet(sheets, id, fila) {
 // afectar el saldo (las fórmulas de Saldo sí se recalculan solas, ver pacientesSheet.js).
 async function movimientoAnular(req, res) {
   const { id, fila } = req.body;
-  if (!id || !fila) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (!id || (!fila && !req.body.idRegistro)) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (await intentarEscrituraFicha(id, 'movimiento-anular', { fila, idRegistro: req.body.idRegistro }, res, { success: true })) return;
 
   try {
     const sheets = getPacientesSheetsClient();
@@ -1647,7 +1703,8 @@ async function movimientoAnular(req, res) {
 // en el frontend (ver abrirFormMov/autosaveMovAhora), no llega nunca acá.
 async function movimientoLimpiar(req, res) {
   const { id, fila } = req.body;
-  if (!id || !fila) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (!id || (!fila && !req.body.idRegistro)) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (await intentarEscrituraFicha(id, 'movimiento-limpiar', { fila, idRegistro: req.body.idRegistro }, res, { success: true })) return;
 
   try {
     const sheets = getPacientesSheetsClient();
@@ -1684,6 +1741,8 @@ async function prestacionAgregar(req, res) {
   const { id, fecha, tratamiento, codigo, autorizado } = req.body;
   if (!id || !fecha || !String(fecha).trim()) return res.status(400).json({ success: false, message: 'Falta fecha.' });
 
+  if (await intentarEscrituraFicha(id, 'prestacion-agregar', { fecha, tratamiento, codigo, autorizado }, res, (r) => ({ success: true, idRegistro: r.cambios?.[0]?.id }))) return;
+
   const sheets = getPacientesSheetsClient();
   let fila;
   try {
@@ -1711,7 +1770,8 @@ async function prestacionAgregar(req, res) {
 
 async function prestacionEditar(req, res) {
   const { id, fila, fecha, tratamiento, codigo, autorizado } = req.body;
-  if (!id || !fila) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (!id || (!fila && !req.body.idRegistro)) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (await intentarEscrituraFicha(id, 'prestacion-editar', { fila, idRegistro: req.body.idRegistro, fecha, tratamiento, codigo, autorizado }, res, { success: true })) return;
 
   try {
     await escribirPrestacionEnFila(id, fila, { fecha, tratamiento, codigo, autorizado });
@@ -1726,7 +1786,8 @@ async function prestacionEditar(req, res) {
 
 async function prestacionEliminar(req, res) {
   const { id, fila } = req.body;
-  if (!id || !fila) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (!id || (!fila && !req.body.idRegistro)) return res.status(400).json({ success: false, message: 'Falta fila.' });
+  if (await intentarEscrituraFicha(id, 'prestacion-eliminar', { fila, idRegistro: req.body.idRegistro }, res, { success: true })) return;
 
   try {
     await escribirPrestacionEnFila(id, fila, { fecha: '', tratamiento: '', codigo: '', autorizado: false });

@@ -3,7 +3,8 @@ import {
   getCalendarClient, CALENDAR_ID, SOBRETURNOS_CALENDAR_ID, SLOT_MINUTES, TIME_ZONE,
   toArgDate, eventBounds, crearTurno, formatArgDay, formatArgTime,
   extraerTelefono, extraerMotivo, extraerEsNuevoPaciente, extraerConfirmado, escribirConfirmado,
-  extraerConfirmacionSolicitada, extraerCodigoCorto, asegurarCodigoCorto, extraerDni, extraerEmail,
+  extraerConfirmacionSolicitada, extraerCodigoCorto, asegurarCodigoCorto, extraerDni, extraerEmail, generarCodigoCorto,
+  telefonoParaWhatsApp,
 } from '../lib/googleCalendar.js';
 import { avisarFallo } from '../lib/alertas.js';
 import { rpcAdmin } from '../lib/adminSupabase.js';
@@ -11,6 +12,8 @@ import { firmarToken, secretoAutoficha } from '../lib/autoficha.js';
 import { conReintentos } from '../lib/retry.js';
 import { obtenerHorariosConfig, logActividad } from '../lib/adminConfig.js';
 import { espejarTurnosBestEffort } from '../lib/espejoTurnos.js';
+import { agendaPrimariaActiva, escribirAgendaRpc, leerAgendaRpc } from '../lib/agendaSupabase.js';
+import { aTituloCase } from '../lib/pacientesSheet.js';
 
 // El ticket térmico imprime un QR también para sobreturnos (ver gestion/index.html),
 // así que "obtener"/"cancelar" tienen que poder apuntar a SOBRETURNOS_CALENDAR_ID —
@@ -47,8 +50,24 @@ export default async function handler(req, res) {
 
   try {
     const { date, time, nombre, apellido, telefono, dni, email, motivo, esNuevo } = req.body;
-    const calendar = getCalendarClient();
     const { slotMinutes } = await obtenerHorariosConfig();
+    if (agendaPrimariaActiva()) {
+      if (!telefono || !telefono.trim()) return res.status(200).json({ success: false, message: 'El teléfono es obligatorio.' });
+      const tel = telefonoParaWhatsApp(telefono);
+      if (!tel) return res.status(200).json({ success: false, message: 'Ese teléfono no parece válido. Revisalo e intentá de nuevo.' });
+      const title = `${aTituloCase(nombre)} ${aTituloCase(apellido) || ''}`.trim();
+      const start = toArgDate(date, time);
+      const payload = { inicio: start.toISOString(), fin: new Date(start.getTime() + slotMinutes * 60000).toISOString(), tipo: 'turno', paciente_nombre: title,
+        dni: String(dni || '').replace(/\D/g, ''), telefono: tel, email, motivo, paciente_nuevo: !!esNuevo, telefono_verificado: true,
+        confirmado: false, confirmacion_solicitada: false, codigo_corto: generarCodigoCorto(), ubicacion: 'Ameghino 410, E3260 Concepción del Uruguay, Entre Ríos, Argentina',
+        description_original: `Teléfono: ${tel}\nTeléfono verificado: Sí\nDNI: ${formatearDniConPuntos(dni) || '-'}\nEmail: ${email || '-'}\nMotivo: ${motivo || '-'}\nPaciente nuevo: ${esNuevo ? 'Sí' : 'No'}`, calendar_id: CALENDAR_ID };
+      const data = await escribirAgendaRpc('consultorio_agenda_crear_turno', payload);
+      if (!data.ok) return res.status(200).json({ success: false, message: data.message || 'Justo se ocupó ese horario. Por favor elegí otro disponible.' });
+      await logActividad({ tipo: 'turno_creado', detalle: `${nombre} ${apellido} — ${date} ${time}`, actor: 'paciente (/turnos)' });
+      if (!data.repetido) await espejarTurnoNuevo(data.id, payload);
+      return res.status(200).json({ success: true, message: `Turno confirmado para el ${date} a las ${time} hs (hora Argentina).`, eventId: data.id, codigoCorto: payload.codigo_corto });
+    }
+    const calendar = getCalendarClient();
     // Misma lógica de creación de turnos que usa el panel de /gestion — ver lib/googleCalendar.js.
     const resultado = await crearTurno(calendar, { date, time, nombre, apellido, telefono, dni, email, motivo, esNuevo, slotMinutes });
     if (resultado.success) {
@@ -61,6 +80,54 @@ export default async function handler(req, res) {
     await avisarFallo({ endpoint: 'api/reservar.js', detalle: 'crear turno', error: err });
     res.status(500).json({ success: false, message: 'Hubo un error al confirmar el turno. Probá de nuevo.' });
   }
+}
+
+async function espejarTurnoNuevo(id, turno) {
+  if (process.env.AGENDA_ESPEJAR_CALENDAR === '0') return;
+  try {
+    const calendar = getCalendarClient();
+    const requestBody = { id: String(id).replace(/-/g, ''),
+      summary: turno.paciente_nombre, location: turno.ubicacion, description: `${turno.description_original}\nCódigo corto: ${turno.codigo_corto}`,
+      start: { dateTime: turno.inicio, timeZone: TIME_ZONE }, end: { dateTime: turno.fin, timeZone: TIME_ZONE },
+    };
+    let data;
+    try { ({ data } = await calendar.events.insert({ calendarId: CALENDAR_ID, requestBody })); }
+    catch (e) { if (e?.code !== 409 && e?.response?.status !== 409) throw e; ({ data } = await calendar.events.get({ calendarId: CALENDAR_ID, eventId: requestBody.id })); }
+    await escribirAgendaRpc('consultorio_agenda_guardar_calendar_id', { id, calendar_event_id: data.id });
+  } catch (e) { console.error('No se pudo espejar turno en Calendar:', e?.message || e); }
+}
+
+async function borrarEspejo(calendarId, eventId) {
+  if (!eventId || process.env.AGENDA_ESPEJAR_CALENDAR === '0') return;
+  try { await getCalendarClient().events.delete({ calendarId: resolverCalendarId(calendarId), eventId }); }
+  catch (e) { console.error('No se pudo borrar espejo de Calendar:', e?.message || e); }
+}
+
+async function espejarEventoActualizado(turno, cambios) {
+  if (process.env.AGENDA_ESPEJAR_CALENDAR === '0') return;
+  try {
+    const calendar = getCalendarClient();
+    if (cambios.calendar_id && cambios.calendar_id !== turno.calendar_id && turno.id) {
+      const requestBody = { id: String(turno.id).replace(/-/g, ''),
+        summary: turno.paciente_nombre || '', location: turno.ubicacion || '', description: turno.description_original || '',
+        start: { dateTime: cambios.inicio, timeZone: TIME_ZONE }, end: { dateTime: cambios.fin, timeZone: TIME_ZONE },
+      };
+      let nuevo;
+      try { ({ data: nuevo } = await calendar.events.insert({ calendarId: cambios.calendar_id, requestBody })); }
+      catch (e) { if (e?.code !== 409 && e?.response?.status !== 409) throw e; ({ data: nuevo } = await calendar.events.get({ calendarId: cambios.calendar_id, eventId: requestBody.id })); }
+      await escribirAgendaRpc('consultorio_agenda_guardar_calendar_id', { id: turno.id, calendar_event_id: nuevo.id });
+      if (turno.calendar_event_id) try { await calendar.events.delete({ calendarId: resolverCalendarId(turno.calendar_id), eventId: turno.calendar_event_id }); } catch { /* el evento nuevo ya quedó creado */ }
+      return;
+    }
+    if (!turno.calendar_event_id) return;
+    const requestBody = {};
+    if (cambios.inicio) { requestBody.start = { dateTime: cambios.inicio, timeZone: TIME_ZONE }; requestBody.end = { dateTime: cambios.fin, timeZone: TIME_ZONE }; }
+    if (typeof cambios.confirmado === 'boolean') {
+      const { data } = await calendar.events.get({ calendarId: resolverCalendarId(turno.calendar_id), eventId: turno.calendar_event_id });
+      requestBody.description = escribirConfirmado(data.description || '', cambios.confirmado);
+    }
+    if (Object.keys(requestBody).length) await calendar.events.patch({ calendarId: resolverCalendarId(turno.calendar_id), eventId: turno.calendar_event_id, requestBody });
+  } catch (e) { console.error('No se pudo actualizar espejo de Calendar:', e?.message || e); }
 }
 
 // Email condicional (ver el pedido): si ya hay un email guardado de un turno
@@ -113,6 +180,20 @@ async function obtenerPropio(req, res) {
     if (!eventId) {
       return res.status(200).json({ success: false, message: 'Falta el turno a consultar.' });
     }
+    if (agendaPrimariaActiva()) {
+      const resultado = await leerAgendaRpc('consultorio_agenda_por_id', { p_id: eventId }, { timeoutMs: 2200 });
+      let ev = Array.isArray(resultado) ? resultado[0] : resultado;
+      if (resultado !== null) {
+        if (!ev || ev.estado === 'cancelado') return res.status(200).json({ success: false, message: 'No encontramos ese turno. Puede que ya haya sido cancelado.' });
+        if (!ev.codigo_corto) {
+          const actualizado = await escribirAgendaRpc('consultorio_agenda_asegurar_codigo', { id: eventId, codigo_corto: generarCodigoCorto() });
+          ev = actualizado.turno || ev;
+        }
+        const start = new Date(ev.inicio);
+        return res.status(200).json({ success: true, nombre: ev.paciente_nombre || '', date: formatArgDay(start), time: formatArgTime(start), confirmado: !!ev.confirmado,
+          confirmacionSolicitada: !!ev.confirmacion_solicitada, codigoCorto: ev.codigo_corto || '' });
+      }
+    }
     const calendar = getCalendarClient();
     const { data: ev } = await conReintentos(() => calendar.events.get({ calendarId: resolverCalendarId(calendarId), eventId }));
     // Un turno recién cancelado no siempre tira error en events.get de entrada —
@@ -158,6 +239,26 @@ async function resolverCodigoCorto(req, res) {
   if (!codigo) return paginaLinkInvalido(res);
 
   try {
+    if (agendaPrimariaActiva()) {
+      const encontrado = await leerAgendaRpc('consultorio_agenda_por_codigo', { p_codigo: codigo }, { timeoutMs: 2200 });
+      if (encontrado !== null) {
+        const row = Array.isArray(encontrado) ? encontrado[0] : encontrado;
+        if (!row) return paginaLinkInvalido(res);
+        if (req.query.confirmar) {
+          const ua = String(req.headers['user-agent'] || '');
+          const esRobot = req.method === 'HEAD' || /bot|crawl|spider|preview|whatsapp|facebookexternalhit|slack|telegram|embedly|curl|wget|python|node-fetch/i.test(ua);
+          const start = new Date(row.inicio);
+          const detalle = `${row.paciente_nombre || 'tu turno'} — ${formatArgDay(start)} a las ${formatArgTime(start)}hs`;
+          if (esRobot) return paginaConfirmacion(res, { confirmado: false, detalle });
+          const confirmado = await escribirAgendaRpc('consultorio_agenda_confirmar', { id: row.id, confirmado: true });
+          await espejarEventoActualizado(confirmado.turno || row, { confirmado: true });
+          await logActividad({ tipo: 'turno_confirmado', detalle: `${row.paciente_nombre || 'paciente'} — ${formatArgDay(start)} ${formatArgTime(start)}hs`, actor: 'paciente (link)' });
+          return paginaConfirmacion(res, { confirmado: true, detalle });
+        }
+        const params = new URLSearchParams({ eventId: row.id });
+        return res.redirect(302, `/turno?${params.toString()}`);
+      }
+    }
     const calendar = getCalendarClient();
     const [principal, sobreturnos] = await Promise.all([
       conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, q: codigo, maxResults: 50, singleEvents: true })),
@@ -276,6 +377,12 @@ async function confirmarPropio(req, res) {
     if (!eventId) {
       return res.status(200).json({ success: false, message: 'Falta el turno a confirmar.' });
     }
+    if (agendaPrimariaActiva()) {
+      const r = await escribirAgendaRpc('consultorio_agenda_confirmar', { id: eventId, confirmado: true });
+      if (!r.ok) return res.status(200).json({ success: false, message: 'No encontramos ese turno. Puede que ya haya sido cancelado.' });
+      await espejarEventoActualizado(r.turno || { id: eventId }, { confirmado: true });
+      return res.status(200).json({ success: true, message: '¡Turno confirmado! Gracias por avisarnos.' });
+    }
     const calendar = getCalendarClient();
     const calId = resolverCalendarId(calendarId);
     const { data: ev } = await conReintentos(() => calendar.events.get({ calendarId: calId, eventId }));
@@ -305,6 +412,13 @@ async function cancelarPropio(req, res) {
     if (!eventId) {
       return res.status(200).json({ success: false, message: 'Falta el turno a cancelar.' });
     }
+    if (agendaPrimariaActiva()) {
+      const r = await escribirAgendaRpc('consultorio_agenda_cancelar', { id: eventId });
+      if (!r.ok) return res.status(200).json({ success: false, message: 'No encontramos ese turno. Puede que ya haya sido cancelado.' });
+      await borrarEspejo(r.calendar_id, r.calendar_event_id);
+      await logActividad({ tipo: 'turno_cancelado', detalle: eventId, actor: 'paciente (/turno)' });
+      return res.status(200).json({ success: true, message: 'Turno cancelado.' });
+    }
     const calendar = getCalendarClient();
     const calId = resolverCalendarId(calendarId);
     let detalleLegible = eventId;
@@ -330,6 +444,18 @@ async function moverPropio(req, res) {
     const { eventId, date, time, calendarId } = req.body;
     if (!eventId || !date || !time) {
       return res.status(200).json({ success: false, message: 'Faltan datos para reprogramar.' });
+    }
+
+    if (agendaPrimariaActiva()) {
+      const { slotMinutes } = await obtenerHorariosConfig();
+      const inicio = toArgDate(date, time);
+      const r = await escribirAgendaRpc('consultorio_agenda_mover', { id: eventId, inicio: inicio.toISOString(), fin: new Date(inicio.getTime() + slotMinutes * 60000).toISOString(), calendar_id: CALENDAR_ID });
+      if (!r.ok) return res.status(200).json({ success: false, message: 'Justo se ocupó ese horario. Elegí otro disponible.' });
+      const turnoActualizado = r.turno || { id: eventId };
+      if (r.calendar_anterior) turnoActualizado.calendar_id = r.calendar_anterior;
+      if (r.calendar_event_id_anterior !== undefined) turnoActualizado.calendar_event_id = r.calendar_event_id_anterior;
+      await espejarEventoActualizado(turnoActualizado, { inicio: inicio.toISOString(), fin: new Date(inicio.getTime() + slotMinutes * 60000).toISOString(), calendar_id: CALENDAR_ID });
+      return res.status(200).json({ success: true, message: `Turno reprogramado para el ${date} a las ${time} hs (hora Argentina).`, eventId: r.id || eventId, codigoCorto: r.codigo_corto || '' });
     }
 
     const calendar = getCalendarClient();

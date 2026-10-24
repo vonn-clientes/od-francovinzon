@@ -10,6 +10,7 @@ import { esFeriado } from '../../lib/feriados.js';
 import { conReintentos } from '../../lib/retry.js';
 import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
 import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
+import { leerAgendaRpc, eventosAgenda } from '../../lib/agendaSupabase.js';
 
 const MESES_RANGO = 6;
 const TTL_DNI_FICHA_TAREAS = 2 * 60 * 1000;
@@ -74,6 +75,20 @@ export default async function handler(req, res) {
     timeMin.setMonth(timeMin.getMonth() - MESES_RANGO);
     const timeMax = new Date(now);
     timeMax.setMonth(timeMax.getMonth() + MESES_RANGO);
+
+    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') {
+      const desdeUtc = new Date(now); desdeUtc.setUTCMonth(desdeUtc.getUTCMonth() - MESES_RANGO);
+      const hastaUtc = new Date(now); hastaUtc.setUTCMonth(hastaUtc.getUTCMonth() + MESES_RANGO);
+      const eventos = await eventosAgenda(desdeUtc.toISOString(), hastaUtc.toISOString());
+      if (eventos !== null) {
+        const qNorm = normalizarTexto(q);
+        const items = eventos.filter((ev) => ev.__tipo !== 'bloqueo' && normalizarTexto(`${ev.summary || ''} ${ev.description || ''}`).includes(qNorm))
+          .map((ev) => ({ id: ev.id, calendarId: ev.calendarId || '', start: eventBounds(ev).start.toISOString(), end: eventBounds(ev).end.toISOString(), title: ev.summary || '',
+            description: ev.description || '', tipo: ev.__tipo, allDay: false }));
+        items.sort((a, b) => new Date(a.start) - new Date(b.start));
+        return res.status(200).json(items);
+      }
+    }
 
     const calendar = getCalendarClient();
 
@@ -522,6 +537,15 @@ async function tareas(req, res) {
 // (Fusionado desde proximo-bloqueo.js, mismo horizonte que RANGO_REORGANIZAR_DIAS.)
 async function proximoBloqueo(req, res) {
   try {
+    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') {
+      const now = new Date();
+      const timeMax = new Date(now.getTime() + RANGO_REORGANIZAR_DIAS * 24 * 60 * 60000);
+      const data = await leerAgendaRpc('consultorio_agenda_proximo_bloqueo', { p_desde: now.toISOString(), p_hasta: timeMax.toISOString() }, { timeoutMs: 2200 });
+      if (data !== null) {
+        const row = Array.isArray(data) ? data[0] : data;
+        return res.status(200).json({ date: row?.date || row?.fecha || null });
+      }
+    }
     const calendar = getCalendarClient();
     const now = new Date();
     const timeMax = new Date(now.getTime() + RANGO_REORGANIZAR_DIAS * 24 * 60 * 60000);

@@ -1,6 +1,7 @@
 import {
   getCalendarClient, TIME_ZONE, toArgDate, eventBounds, isValidGestionKey, escribirConfirmado,
   escribirConfirmacionSolicitada, asegurarCodigoCorto, formatArgDay, formatArgTime, extraerTelefono, extraerDni,
+  generarCodigoCorto,
 } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
@@ -10,6 +11,7 @@ import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 // Confirmación automática por movimientos (2026-08-25): si al MOVER un turno a un día
 // que ya tiene movimiento en la ficha de ese paciente, queda confirmado (Q13). Best-effort.
 import { confirmarTurnoPuntualSiMovimiento } from '../../lib/confirmarTurnosPorMovimiento.js';
+import { agendaPrimariaActiva, escribirAgendaRpc, leerAgendaRpc } from '../../lib/agendaSupabase.js';
 
 // Mover y cancelar un turno/sobreturno comparten ruta (distinguidos por "accion")
 // para no pasarnos del límite de funciones serverless del plan gratuito de Vercel.
@@ -25,6 +27,55 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (agendaPrimariaActiva()) {
+      if (accion === 'cancelar') {
+        const r = await escribirAgendaRpc('consultorio_agenda_cancelar', { id: eventId });
+        if (!r.ok) return res.status(200).json({ success: false, message: 'No se encontró el turno.' });
+        if (r.calendar_event_id && process.env.AGENDA_ESPEJAR_CALENDAR !== '0') {
+          try { await getCalendarClient().events.delete({ calendarId: r.calendar_id, eventId: r.calendar_event_id }); } catch (e) { console.error('Calendar espejo:', e?.message || e); }
+        }
+        await logActividad({ tipo: 'turno_cancelado', detalle: eventId, actor: 'gestión (Ayelen)' });
+        return res.status(200).json({ success: true, message: 'Turno cancelado.' });
+      }
+      if (accion === 'confirmar') {
+        const r = await escribirAgendaRpc('consultorio_agenda_confirmar', { id: eventId, confirmado: !!req.body.confirmado });
+        if (!r.ok) return res.status(200).json({ success: false, message: 'No se encontró el turno.' });
+        await espejarGestion(r.turno, { confirmado: !!req.body.confirmado });
+        return res.status(200).json({ success: true, message: req.body.confirmado ? 'Turno marcado como confirmado.' : 'Turno marcado como sin confirmar.', confirmado: !!req.body.confirmado });
+      }
+      if (accion === 'marcar-confirmacion-solicitada') {
+        const r = await escribirAgendaRpc('consultorio_agenda_confirmacion_solicitada', { id: eventId });
+        const actualizado = await leerAgendaRpc('consultorio_agenda_por_id', { p_id: eventId }, { timeoutMs: 2200 });
+        await espejarGestion(Array.isArray(actualizado) ? actualizado[0] : actualizado, { confirmacionSolicitada: true });
+        return res.status(200).json(r.ok ? { success: true } : { success: false });
+      }
+      if (accion === 'asegurar-codigo-corto') {
+        const data = await leerAgendaRpc('consultorio_agenda_por_id', { p_id: eventId }, { timeoutMs: 2200 });
+        const row = Array.isArray(data) ? data[0] : data;
+        if (row?.codigo_corto) return res.status(200).json({ success: true, codigoCorto: row.codigo_corto });
+        if (row) {
+          const codigoCorto = generarCodigoCorto();
+          const actualizado = await escribirAgendaRpc('consultorio_agenda_asegurar_codigo', { id: eventId, codigo_corto: codigoCorto });
+          await espejarGestion(actualizado.turno, { codigoCorto });
+          return res.status(200).json({ success: true, codigoCorto: actualizado.codigo_corto || codigoCorto });
+        }
+        return res.status(500).json({ success: false, message: 'No se pudo consultar el turno.' });
+      }
+      const { nuevaFecha, nuevaHora, motivo, nombre, apellido } = req.body;
+      const actual = await leerAgendaRpc('consultorio_agenda_por_id', { p_id: eventId }, { timeoutMs: 2200 });
+      const row = Array.isArray(actual) ? actual[0] : actual;
+      if (actual !== null) {
+        if (!row) return res.status(200).json({ success: false, message: 'No se encontró el turno.' });
+        const duracion = new Date(row.fin).getTime() - new Date(row.inicio).getTime();
+        const inicio = toArgDate(nuevaFecha, nuevaHora);
+        const r = await escribirAgendaRpc('consultorio_agenda_editar', { id: eventId, inicio: inicio.toISOString(), fin: new Date(inicio.getTime() + duracion).toISOString(), mantener_tipo: true,
+          paciente_nombre: nombre ? `${aTituloCase(nombre.trim())} ${aTituloCase((apellido || '').trim())}`.trim() : row.paciente_nombre, motivo: motivo || row.motivo });
+        if (!r.ok) return res.status(200).json({ success: false, message: 'Ese horario ya está ocupado.' });
+        await espejarGestion(r.turno, { inicio: inicio.toISOString(), fin: new Date(inicio.getTime() + duracion).toISOString(), motivo: motivo || '' });
+        return res.status(200).json({ success: true, message: `Movido al ${nuevaFecha} a las ${nuevaHora} hs.` });
+      }
+      return res.status(500).json({ success: false, message: 'No se pudo consultar el turno.' });
+    }
     const calendar = getCalendarClient();
 
     if (accion === 'cancelar') {
@@ -171,5 +222,24 @@ export default async function handler(req, res) {
     await avisarFallo({ endpoint: 'api/gestion/evento.js', detalle: accion, error: err });
     res.status(500).json({ success: false, message: 'Error al procesar el turno.' });
   }
+}
+
+async function espejarGestion(turno, cambios) {
+  if (process.env.AGENDA_ESPEJAR_CALENDAR === '0' || !turno?.calendar_event_id) return;
+  try {
+    const cal = getCalendarClient();
+    const id = turno.calendar_id || 'odontologofrancovinzon@gmail.com';
+    const { data: original } = await cal.events.get({ calendarId: id, eventId: turno.calendar_event_id });
+    const requestBody = {};
+    if (cambios.inicio) { requestBody.start = { dateTime: cambios.inicio, timeZone: TIME_ZONE }; requestBody.end = { dateTime: cambios.fin, timeZone: TIME_ZONE }; }
+    if (cambios.confirmado !== undefined) requestBody.description = escribirConfirmado(original.description || '', cambios.confirmado);
+    if (cambios.confirmacionSolicitada) requestBody.description = escribirConfirmacionSolicitada(original.description || '');
+    if (cambios.codigoCorto) requestBody.description = `${(original.description || '').replace(/\s+$/, '')}\nCódigo corto: ${cambios.codigoCorto}`;
+    if (cambios.motivo) requestBody.description = /Motivo:\s*[^\n]*/i.test(original.description || '')
+      ? (original.description || '').replace(/Motivo:\s*[^\n]*/i, `Motivo: ${cambios.motivo}`)
+      : `${(original.description || '').replace(/\s+$/, '')}\nMotivo: ${cambios.motivo}`;
+    if (turno.paciente_nombre) requestBody.summary = turno.paciente_nombre;
+    if (Object.keys(requestBody).length) await cal.events.patch({ calendarId: id, eventId: turno.calendar_event_id, requestBody });
+  } catch (e) { console.error('No se pudo espejar cambio de agenda:', e?.message || e); }
 }
 

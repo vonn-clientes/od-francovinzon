@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-24 — Tramo 7: agenda propia en Supabase (bandera `SUPABASE_AGENDA_PRIMARY=1`, apagada)
+- `lib/agendaSupabase.js` + RPC `consultorio_agenda_*` (`supabase/agenda_primaria.sql`): disponibilidad, agenda del día, reservas, cambios, cancelación, confirmación y bloqueos salen/entran en `consultorio.turnos`/`bloqueos` con chequeo atómico de solapamiento (advisory lock). Activo = `estado<>'cancelado' and en_origen is not false`. Calendar queda como espejo de salida opcional (`AGENDA_ESPEJAR_CALENDAR=0` lo apaga). Con la bandera, la sincronización Calendar->Supabase (`sincronizarTurnosVentana`) se omite. Lecturas caen a Calendar si Supabase falla; escrituras nunca. Apagada = igual que antes. Falta aplicar el SQL antes de encender la bandera.
+
 ## 2026-10-24 — Tramo 6: recetas y borradores en Supabase (con SUPABASE_WRITES_PRIMARY=1)
 - `lib/recetasSupabase.js`: las recetas nuevas se guardan en Supabase Storage (bucket privado `recetas`) con metadatos en `consultorio.archivos_paciente` vía RPC (`consultorio_registrar_receta`, `consultorio_listar_recetas`, `consultorio_leer_receta`); los borradores del Atajo también viven en Storage (vencen a las 48 h al leerse). Rechazo claro de Storage -> Drive; timeout dudoso -> error sin segunda escritura. Fotos siguen en Drive. Pendiente: el OCR de MisRX aún pasa un instante por Drive; la lista con la bandera muestra solo recetas ya copiadas a Supabase.
 

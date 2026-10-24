@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-24 — Tramo 8: consolidado, asistencia y confirmación automática sin Google
+- Tabla `consultorio.consolidados` (importada de la copia del consolidado: 384 filas) con RPC `consultorio_consolidados_*`; con `SUPABASE_WRITES_PRIMARY=1` el consolidado (email, asistencia, visitas) y el recálculo de asistencia viven en Supabase. El cron `healthcheck` pasa a recalcular asistencia y chequear Supabase (`consultorio_tramo8_health`) sin tocar Drive/Calendar/Sheets. Con `SUPABASE_AGENDA_PRIMARY=1`, la confirmación automática por movimiento lee/confirma turnos en Supabase (Calendar solo como espejo).
+- `consultorio_sync_ficha` ya no pisa fichas con ediciones en Supabase (`ficha_version>0`); `saldo_ars` se recalcula por trigger desde `ficha_json`.
+
 ## 2026-10-24 — Tramo 7: agenda propia en Supabase (bandera `SUPABASE_AGENDA_PRIMARY=1`, apagada)
 - `lib/agendaSupabase.js` + RPC `consultorio_agenda_*` (`supabase/agenda_primaria.sql`): disponibilidad, agenda del día, reservas, cambios, cancelación, confirmación y bloqueos salen/entran en `consultorio.turnos`/`bloqueos` con chequeo atómico de solapamiento (advisory lock). Activo = `estado<>'cancelado' and en_origen is not false`. Calendar queda como espejo de salida opcional (`AGENDA_ESPEJAR_CALENDAR=0` lo apaga). Con la bandera, la sincronización Calendar->Supabase (`sincronizarTurnosVentana`) se omite. Lecturas caen a Calendar si Supabase falla; escrituras nunca. Apagada = igual que antes. Falta aplicar el SQL antes de encender la bandera.
 

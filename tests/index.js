@@ -13,3 +13,4 @@ import './fichaDesdeSupabase.test.js';
 import './busquedaSupabase.test.js';
 import './crearFichaSupabase.test.js';
 import './tramo5.test.js';
+import './recetasSupabase.test.js';

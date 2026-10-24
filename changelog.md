@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-24 — Tramo 6: recetas y borradores en Supabase (con SUPABASE_WRITES_PRIMARY=1)
+- `lib/recetasSupabase.js`: las recetas nuevas se guardan en Supabase Storage (bucket privado `recetas`) con metadatos en `consultorio.archivos_paciente` vía RPC (`consultorio_registrar_receta`, `consultorio_listar_recetas`, `consultorio_leer_receta`); los borradores del Atajo también viven en Storage (vencen a las 48 h al leerse). Rechazo claro de Storage -> Drive; timeout dudoso -> error sin segunda escritura. Fotos siguen en Drive. Pendiente: el OCR de MisRX aún pasa un instante por Drive; la lista con la bandera muestra solo recetas ya copiadas a Supabase.
+
 ## 2026-10-24 — Tramo 5: fusión de fichas en Supabase (con SUPABASE_WRITES_PRIMARY=1)
 - RPC `consultorio_fusionar_fichas(destino, origen, ficha, versiones)`: aplica atómicamente la ficha fusionada (calculada por `fusionarFichas` en `lib/fichaMotor.js`, con filas renumeradas y saldos recalculados) y marca el origen con `pacientes.eliminado_at`. Buscadores, listados, exportes y escaneo excluyen fichas eliminadas. Conflicto de versión reintenta; timeout = 503 sin tocar Google. Config/actividad/alertas ya tenían RPC propias (sin cambios).
 

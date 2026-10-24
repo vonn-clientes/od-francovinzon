@@ -1559,6 +1559,7 @@ async function exportFichaPdf(req, res) {
     res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoSeguro(campos.nombre)}_${nombreArchivoSeguro(campos.apellido)}_ficha.pdf"`);
     return res.status(200).send(buffer);
   }
+  if (String(id).startsWith('sb-')) return res.status(503).json({ success: false, message: 'No se pudo leer la ficha en Supabase.' });
   const sheets = getPacientesSheetsClient();
   const [campos, financiero, movRaw] = await Promise.all([
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C5:C15` })),
@@ -1600,6 +1601,7 @@ async function exportFinancieroPdf(req, res) {
     res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoSeguro(ficha.campos?.nombre)}_${nombreArchivoSeguro(ficha.campos?.apellido)}_estado_cuenta.pdf"`);
     return res.status(200).send(buffer);
   }
+  if (String(id).startsWith('sb-')) return res.status(503).json({ success: false, message: 'No se pudo leer la ficha en Supabase.' });
   const sheets = getPacientesSheetsClient();
   const [campos, movRaw] = await Promise.all([
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C5:C6` })),

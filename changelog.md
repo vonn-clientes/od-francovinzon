@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-24 — Tramo 3: crear paciente y contacto en Supabase (con la bandera encendida)
+- RPC `consultorio_crear_ficha`; `lib/crearFichaSupabase.js` crea la ficha (id `sb-<uuid>`, nunca va a Drive/Sheets) y `lib/actualizarContactoSupabase.js` guarda teléfono/DNI. `agregar-telefono.js`, `agregar-dni.js` y el alta de `pacientes.js` escriben en Supabase; fusionar fichas `sb-` se rechaza por ahora. Bandera apagada = igual que antes.
+
 ## 2026-10-24 — Tramo 2: buscadores y listados desde Supabase (con la bandera encendida)
 - RPC nuevas `consultorio_buscar_pacientes` y `consultorio_listar_pacientes`; `lib/busquedaSupabase.js`. Autocompletado de pacientes (`buscar.js`), `listar`, `buscarPublico` y `hoyPublico` (cruce de turnos por nombre o DNI) leen de `consultorio.pacientes` y caen a Drive/consolidado solo si Supabase no devuelve nada. El listado completo de /gestion sigue en el consolidado (asistencia y email aún no están en Supabase).
 - Monitoreo por RPC `consultorio_monitoreo` (el schema `consultorio` no se consulta por REST directo).

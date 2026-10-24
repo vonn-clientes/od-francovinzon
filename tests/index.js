@@ -10,3 +10,4 @@ import './adminSupabase.test.js';
 import './escrituraPrimaria.test.js';
 import './fichaDesdeSupabase.test.js';
 import './busquedaSupabase.test.js';
+import './crearFichaSupabase.test.js';

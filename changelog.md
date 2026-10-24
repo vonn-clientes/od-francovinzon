@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-24 — Base de la escritura primaria en Supabase (sin efecto todavía)
+- Supabase: columna `pacientes.ficha_version`, tabla `ficha_outbox` (cola para espejar a Google) y RPC `consultorio_aplicar_ficha` (compare-and-swap por versión). `consultorio_leer_ficha` ahora devuelve `ficha_version`.
+- `lib/escrituraPrimaria.js` (nuevo, NO conectado a ningún endpoint): aplica una acción con `fichaMotor` y la guarda con control de versión; reintenta ante conflicto, nunca a ciegas ante timeout. Bandera `SUPABASE_WRITES_PRIMARY=1` (apagada). Plan completo: `_codex_out/plan-escrituras-supabase.md` (no versionado).
+- Sombra: el comparador ignora `anulado:false` y ceros a la izquierda del código; el texto de anulación ya no duplica el `$`.
+
 ## 2026-10-19 — Sugerencias de fichas por nombre y DNI en /admin
 - En "Pacientes sin ficha asignada", mostrar hasta tres fichas candidatas ordenadas por DNI exacto, nombre exacto y parecido del nombre.
 - Indicar por qué aparece cada sugerencia y abrir el selector con esa ficha preseleccionada; la asignación sigue requiriendo confirmación.

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-24 — Tramo 5: fusión de fichas en Supabase (con SUPABASE_WRITES_PRIMARY=1)
+- RPC `consultorio_fusionar_fichas(destino, origen, ficha, versiones)`: aplica atómicamente la ficha fusionada (calculada por `fusionarFichas` en `lib/fichaMotor.js`, con filas renumeradas y saldos recalculados) y marca el origen con `pacientes.eliminado_at`. Buscadores, listados, exportes y escaneo excluyen fichas eliminadas. Conflicto de versión reintenta; timeout = 503 sin tocar Google. Config/actividad/alertas ya tenían RPC propias (sin cambios).
+
 ## 2026-10-24 — Tramo 4: exportes y métricas de /admin desde Supabase (con SUPABASE_READS=1)
 - RPC `consultorio_admin_pacientes_fichas` (id = ficha_sheet_id). `lib/adminSupabase.js` adapta `ficha_json` para exportes CSV/completo, métricas, deuda y perfil; si la RPC falla o viene vacía, sigue el camino Google. La asistencia sigue usando Calendar hasta completar el backfill de `consultorio.turnos` (`atribuirTurnosPasadosSupabase` queda lista, sin usar). El consolidado (email/asistencia) sigue en Google: no existe aún tabla en Supabase.
 

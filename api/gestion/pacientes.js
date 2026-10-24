@@ -58,6 +58,7 @@ import { aplicarEnSupabase, fusionarEnSupabase, escrituraPrimariaActiva, ejecuta
 import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
 import { crearFichaSupabase } from '../../lib/crearFichaSupabase.js';
 import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
+import { guardarRecetaSupabase, listarRecetasSupabase, descargarRecetaSupabase, guardarTemporalReceta, leerTemporalReceta, borrarTemporalReceta } from '../../lib/recetasSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -2314,6 +2315,10 @@ async function listarRecetas(req, res) {
   const pacienteId = req.query.id;
   if (!pacienteId) return res.status(400).json({ error: 'Falta id.' });
   try {
+    if (escrituraPrimariaActiva(process.env)) {
+      const resultado = await listarRecetasSupabase({ fichaId: pacienteId });
+      if (resultado.disponible) return res.status(200).json(resultado.recetas);
+    }
     const drive = getPacientesDriveClient();
     const folderId = await getOrCreateRecetasFolderId(drive);
     const { data } = await conReintentos(() => drive.files.list({
@@ -2335,6 +2340,15 @@ async function servirRecetaPdf(req, res) {
   const recetaId = req.query.recetaId;
   if (!recetaId) return res.status(400).send('Falta recetaId.');
   try {
+    if (escrituraPrimariaActiva(process.env)) {
+      const resultado = await descargarRecetaSupabase({ id: recetaId });
+      if (resultado.disponible && resultado.buffer) {
+        res.setHeader('Content-Type', resultado.mimeType);
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.status(200).send(resultado.buffer);
+      }
+      if (resultado.disponible) return res.status(404).send('No se pudo cargar la receta.');
+    }
     const drive = getPacientesDriveClient();
     const { data } = await conReintentos(() => drive.files.get(
       { fileId: recetaId, alt: 'media' },
@@ -2388,9 +2402,17 @@ async function guardarReceta(req, res) {
 
     const pdfBuffer = await generarPdfReceta({ paciente: { nombre, apellido, dni, fechaNacimiento }, receta });
 
-    const folderId = await getOrCreateRecetasFolderId(drive);
     const descripcion = [receta.fechaReceta, (receta.medicamentos || []).map((m) => m.descripcion).filter(Boolean).join('; ')]
       .filter(Boolean).join(' — ').slice(0, 500);
+    if (escrituraPrimariaActiva(process.env)) {
+      const resultado = await guardarRecetaSupabase({ fichaId: pacienteId, nombre: `${pacienteId}__${Date.now()}.pdf`, buffer: pdfBuffer, metadata: { descripcion, fecha_receta: receta.fechaReceta || null } });
+      if (resultado.ruta === 'supabase') {
+        if (codigoProceso) await borrarRecetaProceso(drive, codigoProceso);
+        return res.status(200).json({ success: true, id: resultado.id, pacienteId, fichaCreada });
+      }
+      if (resultado.ruta === 'incierta') return res.status(200).json({ success: false, message: 'No se pudo confirmar el guardado. Revisá el historial antes de reintentar.' });
+    }
+    const folderId = await getOrCreateRecetasFolderId(drive);
     const creada = await conReintentos(() => drive.files.create({
       requestBody: {
         name: `${pacienteId}__${Date.now()}.pdf`,
@@ -2453,6 +2475,10 @@ async function limpiarRecetasProcesoVencidas(drive, folderId) {
 }
 
 async function borrarRecetaProceso(drive, codigo) {
+  if (escrituraPrimariaActiva(process.env)) {
+    const borrado = await borrarTemporalReceta({ codigo });
+    if (borrado.disponible) return;
+  }
   try {
     const folderId = await getOrCreateRecetasProcesoFolderId(drive);
     const { data } = await conReintentos(() => drive.files.list({
@@ -2484,14 +2510,15 @@ async function recibirRecetaShortcut(req, res) {
     const drive = getPacientesDriveClient();
     const resultado = await ocrYParsearReceta(drive, buffer);
 
-    const folderId = await getOrCreateRecetasProcesoFolderId(drive);
-    limpiarRecetasProcesoVencidas(drive, folderId); // no se espera, es limpieza oportunista
     const codigo = crypto.randomBytes(5).toString('hex');
-    await conReintentos(() => drive.files.create({
-      requestBody: { name: `${codigo}.json`, parents: [folderId] },
-      media: { mimeType: 'application/json', body: bufferToStream(Buffer.from(JSON.stringify(resultado))) },
-      fields: 'id',
-    }));
+    let temporal = { disponible: false };
+    if (escrituraPrimariaActiva(process.env)) temporal = await guardarTemporalReceta({ codigo, contenido: resultado });
+    if (temporal.incierto) return res.status(200).json({ success: false, message: 'No se pudo confirmar el borrador. Probá abrir el enlace antes de reenviar el PDF.' });
+    if (!temporal.disponible) {
+      const folderId = await getOrCreateRecetasProcesoFolderId(drive);
+      limpiarRecetasProcesoVencidas(drive, folderId); // limpieza oportunista
+      await conReintentos(() => drive.files.create({ requestBody: { name: `${codigo}.json`, parents: [folderId] }, media: { mimeType: 'application/json', body: bufferToStream(Buffer.from(JSON.stringify(resultado))) }, fields: 'id' }));
+    }
 
     res.status(200).json({ success: true, url: `https://od-francovinzon.vercel.app/mobilephotouploaderodfrancovinzon/receta/?codigo=${codigo}` });
   } catch (err) {
@@ -2505,6 +2532,13 @@ async function obtenerRecetaProceso(req, res) {
   const codigo = req.query.codigo;
   if (!codigo || !/^[a-f0-9]{10}$/.test(codigo)) return res.status(400).json({ error: 'Código inválido.' });
   try {
+    if (escrituraPrimariaActiva(process.env)) {
+      const temporal = await leerTemporalReceta({ codigo });
+      if (temporal.disponible) {
+        if (!temporal.contenido) return res.status(404).json({ error: 'No se encontró esa receta (puede que ya haya sido guardada, o que hayan pasado más de 48hs).' });
+        return res.status(200).json({ success: true, codigo, ...temporal.contenido });
+      }
+    }
     const drive = getPacientesDriveClient();
     const folderId = await getOrCreateRecetasProcesoFolderId(drive);
     const { data } = await conReintentos(() => drive.files.list({

@@ -21,6 +21,14 @@ test('copia archivo, calcula checksum y registra metadata', async () => {
   assert.equal(body.ficha_id, 'ficha-7');
 });
 
+test('copia recetas al bucket privado recetas con la ruta ficha/timestamp-nombre', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => { calls.push(url); return { ok: true, json: async () => [] }; };
+  const drive = { files: { get: async () => ({ data: Buffer.from('pdf') }) } };
+  await copiarArchivosLote({ drive, ficheros: [{ ...file, tipo: 'receta', name: 'ficha-7__receta.pdf' }], supabaseUrl: 'https://db.test', serviceKey: 'secret', fetchImpl });
+  assert.match(calls[1], /storage\/v1\/object\/recetas\/ficha-7\/[0-9]+-ficha-7__receta.pdf$/);
+});
+
 test('saltea mismo modifiedTime sin descargar', async () => {
   let downloaded = false;
   const fetchImpl = async () => ({ ok: true, json: async () => [{ drive_file_id: file.id, drive_modified_time: file.modifiedTime }] });

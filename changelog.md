@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-24 — Etapa A: las fichas se guardan en Supabase (bandera apagada)
+- Con `SUPABASE_WRITES_PRIMARY=1`, las 9 acciones de ficha de `api/gestion/pacientes.js` (campo, movimientos, prestaciones) se aplican con `fichaMotor` y se guardan en Supabase con control de versión; ya no se escribe en Sheets. Conflicto/timeout dudoso -> 503 sin tocar Google; ficha sin snapshot -> camino Google de siempre. Apagada = comportamiento idéntico al anterior.
+- Lectura: con la bandera, `ficha_version > 0` es autoritativa (no se compara con Drive).
+- El motor asigna `fila` propia consecutiva a movimientos y prestaciones nuevos (antes la daba Sheets); evita filas nulas/duplicadas en `movimientos`.
+- Pendiente de esta etapa: crear paciente, fusionar, completar teléfono, exports y listados que aún leen Sheets.
+
 ## 2026-10-24 — Base de la escritura primaria en Supabase (sin efecto todavía)
 - Supabase: columna `pacientes.ficha_version`, tabla `ficha_outbox` (cola para espejar a Google) y RPC `consultorio_aplicar_ficha` (compare-and-swap por versión). `consultorio_leer_ficha` ahora devuelve `ficha_version`.
 - `lib/escrituraPrimaria.js` (nuevo, NO conectado a ningún endpoint): aplica una acción con `fichaMotor` y la guarda con control de versión; reintenta ante conflicto, nunca a ciegas ante timeout. Bandera `SUPABASE_WRITES_PRIMARY=1` (apagada). Plan completo: `_codex_out/plan-escrituras-supabase.md` (no versionado).

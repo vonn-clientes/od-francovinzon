@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aplicarEnSupabase, escrituraPrimariaActiva } from '../lib/escrituraPrimaria.js';
+import { aplicarEnSupabase, escrituraPrimariaActiva, ejecutarEscrituraPrimaria } from '../lib/escrituraPrimaria.js';
 
 const env = { SUPABASE_WRITES_PRIMARY: '1', SUPABASE_URL: 'https://db.test', SUPABASE_SERVICE_KEY: 'secret' };
 const fila = (ficha = { id: 'p1', campos: {} }, ficha_version = 4) => ({ ficha, ficha_version });
@@ -20,6 +20,33 @@ test('la bandera requiere activación y credenciales', () => {
   assert.equal(escrituraPrimariaActiva({ ...env, SUPABASE_WRITES_PRIMARY: '0' }), false);
   assert.equal(escrituraPrimariaActiva({ ...env, SUPABASE_SERVICE_KEY: '' }), false);
   assert.equal(escrituraPrimariaActiva(env), true);
+});
+
+test('la ruta apagada conserva Google y no invoca Supabase', async () => {
+  let supabase = 0, google = 0;
+  const r = await ejecutarEscrituraPrimaria({ activa: false, aplicar: async () => { supabase += 1; }, escribirGoogle: async () => { google += 1; return 'sheet'; } });
+  assert.deepEqual(r, { ruta: 'google', resultado: 'sheet' });
+  assert.equal(supabase, 0);
+  assert.equal(google, 1);
+});
+
+test('Supabase exitoso no invoca Google y ambiguo tampoco permite fallback', async () => {
+  let google = 0;
+  const ok = await ejecutarEscrituraPrimaria({ activa: true, aplicar: async () => ({ ok: true, ficha: {} }), escribirGoogle: async () => { google += 1; } });
+  assert.equal(ok.ruta, 'supabase');
+  assert.equal(google, 0);
+  const ambiguo = await ejecutarEscrituraPrimaria({ activa: true, aplicar: async () => ({ ok: false, motivo: 'ambiguo' }), escribirGoogle: async () => { google += 1; } });
+  assert.deepEqual(ambiguo, { ruta: 'rechazada', resultado: { ok: false, motivo: 'ambiguo' } });
+  assert.equal(google, 0);
+});
+
+test('sin_snapshot permite Google; invalido y conflicto no', async () => {
+  let google = 0;
+  const base = { activa: true, escribirGoogle: async () => { google += 1; return 'sheet'; } };
+  assert.equal((await ejecutarEscrituraPrimaria({ ...base, aplicar: async () => ({ ok: false, motivo: 'sin_snapshot' }) })).ruta, 'google');
+  assert.equal((await ejecutarEscrituraPrimaria({ ...base, aplicar: async () => ({ ok: false, motivo: 'invalido' }) })).ruta, 'rechazada');
+  assert.equal((await ejecutarEscrituraPrimaria({ ...base, aplicar: async () => ({ ok: false, motivo: 'conflicto' }) })).ruta, 'rechazada');
+  assert.equal(google, 1);
 });
 
 test('aplica y guarda la acción usando p_accion y p_body', async () => {

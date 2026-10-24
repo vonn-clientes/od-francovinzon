@@ -1870,7 +1870,7 @@
       return;
     }
     tbody.innerHTML = visibles.map((m) => `
-      <tr class="${m.anulado ? 'anulado' : ''}" data-fila="${m.fila}">
+      <tr class="${m.anulado ? 'anulado' : ''}" data-fila="${m.fila}" data-id-registro="${m.idRegistro || ''}">
         <td>${escapeHtml(m.fecha)}</td>
         <td>${escapeHtml(m.tratamiento)}</td>
         <td class="num">${escapeHtml(m.monedaDebe === 'USD' ? String(m.debe || '').replace('$', 'US$') : m.debe)}</td>
@@ -1880,15 +1880,15 @@
         <td>
           ${m.anulado ? '' : `
           <div class="mov-actions">
-            <button class="icon-btn btn-editar-mov" title="Editar" data-fila="${m.fila}">✎</button>
-            <button class="icon-btn trash btn-anular-mov" title="Anular" data-fila="${m.fila}">✕</button>
+            <button class="icon-btn btn-editar-mov" title="Editar" data-fila="${m.fila}" data-id-registro="${m.idRegistro || ''}">✎</button>
+            <button class="icon-btn trash btn-anular-mov" title="Anular" data-fila="${m.fila}" data-id-registro="${m.idRegistro || ''}">✕</button>
           </div>`}
         </td>
       </tr>
     `).join('');
 
-    tbody.querySelectorAll('.btn-editar-mov').forEach((btn) => btn.addEventListener('click', () => abrirFormMov(Number(btn.dataset.fila))));
-    tbody.querySelectorAll('.btn-anular-mov').forEach((btn) => btn.addEventListener('click', () => anularMovimiento(Number(btn.dataset.fila), btn)));
+    tbody.querySelectorAll('.btn-editar-mov').forEach((btn) => btn.addEventListener('click', () => abrirFormMov(btn.dataset.idRegistro || Number(btn.dataset.fila))));
+    tbody.querySelectorAll('.btn-anular-mov').forEach((btn) => btn.addEventListener('click', () => anularMovimiento(btn.dataset.idRegistro || Number(btn.dataset.fila), btn)));
   }
 
   // ---------- Autosave de campos ----------
@@ -2134,7 +2134,7 @@
     const hintMovAlAbrir = document.getElementById('mov-autosave-hint');
     if (hintMovAlAbrir) { hintMovAlAbrir.textContent = ''; hintMovAlAbrir.classList.add('hidden'); }
     if (fila) {
-      const mov = fichaActual.movimientos.find((m) => m.fila === fila);
+      const mov = fichaActual.movimientos.find((m) => m.fila === fila || m.idRegistro === fila);
       document.getElementById('mov-form-titulo').textContent = 'Editar movimiento';
       movFecha.value = fechaSheetAInput(mov.fecha);
       movFechaGuardada = movFecha.value;
@@ -2157,7 +2157,7 @@
       movMonedaDebe.value = 'ARS'; movMonedaHaber.value = 'ARS'; movAplica.value = 'ARS'; movCotizacion.value = '';
     }
     // Fichas con dólares: el bloque ya viene abierto. Las demás lo ven como un link chico.
-    movTeniaMoneda = !!(fila && (() => { const m = fichaActual.movimientos.find((x) => x.fila === fila); return m && (m.monedaDebe || m.monedaHaber || m.aplicaA); })());
+      movTeniaMoneda = !!(fila && (() => { const m = fichaActual.movimientos.find((x) => x.fila === fila || x.idRegistro === fila); return m && (m.monedaDebe || m.monedaHaber || m.aplicaA); })());
     actualizarDolarMov();
     // Modo "Entrega de dinero": mismo formulario, pero solo fecha + monto + forma de pago
     // (sin tratamiento ni Debe). Se guarda como un pago normal (Haber), igual que siempre.
@@ -2273,7 +2273,7 @@
         const sesion = movSesionId;
         movAutosaveEnCurso = true;
         try {
-          await apiPost({ accion: 'movimiento-limpiar', id: idFicha, fila: filaACrearLimpiar });
+          await apiPost({ accion: 'movimiento-limpiar', id: idFicha, ...(typeof filaACrearLimpiar === 'number' ? { fila: filaACrearLimpiar } : { idRegistro: filaACrearLimpiar }) });
         } catch (e) { /* silencioso */ }
         if (sesion === movSesionId) movFilaCreada = null;
         movAutosaveEnCurso = false;
@@ -2282,7 +2282,7 @@
       }
       if (editandoFilaPrevia) {
         // Movimiento PREEXISTENTE vaciado: restaurar el contenido original (nunca borrar).
-        const orig = fichaActual.movimientos.find((m) => m.fila === editandoMovFila);
+        const orig = fichaActual.movimientos.find((m) => m.fila === editandoMovFila || m.idRegistro === editandoMovFila);
         if (orig) {
           movFecha.value = fechaSheetAInput(orig.fecha);
           movTratamiento.value = orig.tratamiento;
@@ -2322,7 +2322,7 @@
       // actualizaría el turno correspondiente (pedido 2026-08-25).
       const fechaCambio = !!(filaDestino && movFechaGuardada && d.fecha && d.fecha !== movFechaGuardada);
       const r = filaDestino
-        ? await apiPost({ accion: 'movimiento-editar', id: idFicha, fila: filaDestino, fecha: fechaSheet, tratamiento: d.tratamiento, debe: d.debe, haber: d.haber, formaPago: d.formaPago, monedaDebe: d.monedaDebe, monedaHaber: d.monedaHaber, aplicaA: d.aplicaA, cotizacion: d.cotizacion, confirmarAuto: fechaCambio })
+        ? await apiPost({ accion: 'movimiento-editar', id: idFicha, ...(typeof filaDestino === 'number' ? { fila: filaDestino } : { idRegistro: filaDestino }), fecha: fechaSheet, tratamiento: d.tratamiento, debe: d.debe, haber: d.haber, formaPago: d.formaPago, monedaDebe: d.monedaDebe, monedaHaber: d.monedaHaber, aplicaA: d.aplicaA, cotizacion: d.cotizacion, confirmarAuto: fechaCambio })
         : await apiPost({ accion: 'movimiento-agregar', id: idFicha, fecha: fechaSheet, tratamiento: d.tratamiento, debe: d.debe, haber: d.haber, formaPago: d.formaPago, monedaDebe: d.monedaDebe, monedaHaber: d.monedaHaber, aplicaA: d.aplicaA, cotizacion: d.cotizacion });
       if (r.success) movFechaGuardada = d.fecha;
       if (r.success) {
@@ -2330,7 +2330,7 @@
         // memoria de "fila creada por este form" (movFilaCreada) solo se actualiza si
         // esta sesión del form sigue siendo la activa — si el odontólogo ya cerró y
         // abrió OTRO movimiento, ese tiene su propia sesión y no hay que pisarle nada.
-        if (sesion === movSesionId && !filaDestino && r.fila && fichaActual && fichaActual.id === idFicha) movFilaCreada = r.fila;
+        if (sesion === movSesionId && !filaDestino && (r.fila || r.idRegistro) && fichaActual && fichaActual.id === idFicha) movFilaCreada = r.fila || r.idRegistro;
         mostrarHintMov(r.pendiente ? 'Guardado (pendiente de sincronizar)' : 'Guardado ✓', r.pendiente ? 'saving' : 'ok');
         await refetchFichaSilencioso(idFicha);
       } else {
@@ -2376,7 +2376,7 @@
       // quitarlo existe el ✕ Anular.
       if (filaCreadaPorAutosave && sesion === movSesionId) {
         movFilaCreada = null;
-        apiPost({ accion: 'movimiento-limpiar', id: idFicha, fila: filaCreadaPorAutosave }).then(() => refetchFichaSilencioso(idFicha)).catch(() => {});
+        apiPost({ accion: 'movimiento-limpiar', id: idFicha, ...(typeof filaCreadaPorAutosave === 'number' ? { fila: filaCreadaPorAutosave } : { idRegistro: filaCreadaPorAutosave }) }).then(() => refetchFichaSilencioso(idFicha)).catch(() => {});
       }
       return;
     }
@@ -2396,7 +2396,7 @@
     if (!ok) return;
     setBtnLoading(btn);
     try {
-      const r = await apiPost({ accion: 'movimiento-anular', id: idFicha, fila });
+      const r = await apiPost({ accion: 'movimiento-anular', id: idFicha, ...(typeof fila === 'number' ? { fila } : { idRegistro: fila }) });
       if (r.success) {
         toast('✅ Movimiento anulado');
         if (fichaActual && fichaActual.id === idFicha) {
@@ -2900,36 +2900,36 @@
       return;
     }
     tbody.innerHTML = ordenarPorFecha(lista).map((p) => `
-      <tr data-fila="${p.fila}">
+      <tr data-fila="${p.fila}" data-id-registro="${p.idRegistro || ''}">
         <td>${escapeHtml(p.fecha)}</td>
         <td>${escapeHtml(p.tratamiento)}</td>
         <td>${escapeHtml(p.codigo)}</td>
-        <td class="pres-autorizado-cell"><input type="checkbox" class="chk-pres-autorizado" data-fila="${p.fila}" ${p.autorizado ? 'checked' : ''}></td>
+        <td class="pres-autorizado-cell"><input type="checkbox" class="chk-pres-autorizado" data-fila="${p.fila}" data-id-registro="${p.idRegistro || ''}" ${p.autorizado ? 'checked' : ''}></td>
         <td>
           <div class="mov-actions">
-            <button class="icon-btn btn-editar-pres" title="Editar" data-fila="${p.fila}">✎</button>
-            <button class="icon-btn trash btn-eliminar-pres" title="Eliminar" data-fila="${p.fila}">✕</button>
+            <button class="icon-btn btn-editar-pres" title="Editar" data-fila="${p.fila}" data-id-registro="${p.idRegistro || ''}">✎</button>
+            <button class="icon-btn trash btn-eliminar-pres" title="Eliminar" data-fila="${p.fila}" data-id-registro="${p.idRegistro || ''}">✕</button>
           </div>
         </td>
       </tr>
     `).join('');
-    tbody.querySelectorAll('.btn-editar-pres').forEach((btn) => btn.addEventListener('click', () => abrirFormPres(Number(btn.dataset.fila))));
-    tbody.querySelectorAll('.btn-eliminar-pres').forEach((btn) => btn.addEventListener('click', () => eliminarPrestacion(Number(btn.dataset.fila), btn)));
-    tbody.querySelectorAll('.chk-pres-autorizado').forEach((chk) => chk.addEventListener('change', () => toggleAutorizado(Number(chk.dataset.fila), chk.checked, chk)));
+    tbody.querySelectorAll('.btn-editar-pres').forEach((btn) => btn.addEventListener('click', () => abrirFormPres(btn.dataset.idRegistro || Number(btn.dataset.fila))));
+    tbody.querySelectorAll('.btn-eliminar-pres').forEach((btn) => btn.addEventListener('click', () => eliminarPrestacion(btn.dataset.idRegistro || Number(btn.dataset.fila), btn)));
+    tbody.querySelectorAll('.chk-pres-autorizado').forEach((chk) => chk.addEventListener('change', () => toggleAutorizado(chk.dataset.idRegistro || Number(chk.dataset.fila), chk.checked, chk)));
   }
 
   // Tilda/destilda "Autorizado" con un solo clic, sin abrir el form de edición completo.
   // Reusa la acción prestacion-editar (mismos fecha/tratamiento/código que ya tiene la
   // fila, solo cambia autorizado) en vez de sumar una acción nueva al backend.
   async function toggleAutorizado(fila, checked, chk) {
-    const pres = fichaActual.prestacionesObraSocial.find((p) => p.fila === fila);
+    const pres = fichaActual.prestacionesObraSocial.find((p) => p.fila === fila || p.idRegistro === fila);
     if (!pres) return;
     chk.disabled = true;
     try {
       const r = await apiPost({
         accion: 'prestacion-editar',
         id: fichaActual.id,
-        fila,
+        ...(typeof fila === 'number' ? { fila } : { idRegistro: fila }),
         fecha: pres.fecha,
         tratamiento: pres.tratamiento,
         codigo: pres.codigo,
@@ -2973,7 +2973,7 @@
     const hintPresAlAbrir = document.getElementById('pres-autosave-hint');
     if (hintPresAlAbrir) { hintPresAlAbrir.textContent = ''; hintPresAlAbrir.classList.add('hidden'); }
     if (fila) {
-      const pres = fichaActual.prestacionesObraSocial.find((p) => p.fila === fila);
+      const pres = fichaActual.prestacionesObraSocial.find((p) => p.fila === fila || p.idRegistro === fila);
       document.getElementById('pres-form-titulo').textContent = 'Editar prestación';
       presFecha.value = fechaSheetAInput(pres.fecha);
       presTratamiento.value = pres.tratamiento;
@@ -3051,7 +3051,7 @@
         const sesion = presSesionId;
         presAutosaveEnCurso = true;
         try {
-          await apiPost({ accion: 'prestacion-eliminar', id: idFicha, fila: filaAEliminar });
+          await apiPost({ accion: 'prestacion-eliminar', id: idFicha, ...(typeof filaAEliminar === 'number' ? { fila: filaAEliminar } : { idRegistro: filaAEliminar }) });
         } catch (e) { /* silencioso */ }
         if (sesion === presSesionId) presFilaCreada = null;
         presAutosaveEnCurso = false;
@@ -3059,7 +3059,7 @@
         return;
       }
       if (editandoFilaPrevia) {
-        const orig = fichaActual.prestacionesObraSocial.find((p) => p.fila === editandoPresFila);
+        const orig = fichaActual.prestacionesObraSocial.find((p) => p.fila === editandoPresFila || p.idRegistro === editandoPresFila);
         if (orig) {
           presFecha.value = fechaSheetAInput(orig.fecha);
           presTratamiento.value = orig.tratamiento;
@@ -3088,13 +3088,13 @@
     }
     try {
       const r = filaDestino
-        ? await apiPost({ accion: 'prestacion-editar', id: idFicha, fila: filaDestino, fecha: fechaSheet, tratamiento: d.tratamiento, codigo: d.codigo, autorizado: d.autorizado })
+        ? await apiPost({ accion: 'prestacion-editar', id: idFicha, ...(typeof filaDestino === 'number' ? { fila: filaDestino } : { idRegistro: filaDestino }), fecha: fechaSheet, tratamiento: d.tratamiento, codigo: d.codigo, autorizado: d.autorizado })
         : await apiPost({ accion: 'prestacion-agregar', id: idFicha, fecha: fechaSheet, tratamiento: d.tratamiento, codigo: d.codigo, autorizado: d.autorizado });
       if (r.success) {
         // El guardado siempre se completa, pero la memoria de "fila creada por este
         // form" solo se actualiza si esta sesión sigue siendo la activa (ver el mismo
         // patrón con movSesionId en guardarMovDatos).
-        if (sesion === presSesionId && !filaDestino && r.fila && fichaActual && fichaActual.id === idFicha) presFilaCreada = r.fila;
+        if (sesion === presSesionId && !filaDestino && (r.fila || r.idRegistro) && fichaActual && fichaActual.id === idFicha) presFilaCreada = r.fila || r.idRegistro;
         mostrarHintPres(r.pendiente ? 'Guardado (pendiente de sincronizar)' : 'Guardado ✓', r.pendiente ? 'saving' : 'ok');
         await refetchFichaSilencioso(idFicha);
       } else {
@@ -3134,7 +3134,7 @@
       // Una prestación PREEXISTENTE vaciada no se toca: el ✕ de la tabla es el camino.
       if (filaCreadaPorAutosave && sesion === presSesionId) {
         presFilaCreada = null;
-        apiPost({ accion: 'prestacion-eliminar', id: idFicha, fila: filaCreadaPorAutosave }).then(() => refetchFichaSilencioso(idFicha)).catch(() => {});
+        apiPost({ accion: 'prestacion-eliminar', id: idFicha, ...(typeof filaCreadaPorAutosave === 'number' ? { fila: filaCreadaPorAutosave } : { idRegistro: filaCreadaPorAutosave }) }).then(() => refetchFichaSilencioso(idFicha)).catch(() => {});
       }
       return;
     }
@@ -3153,7 +3153,7 @@
     if (!ok) return;
     setBtnLoading(btn);
     try {
-      const r = await apiPost({ accion: 'prestacion-eliminar', id: idFicha, fila });
+      const r = await apiPost({ accion: 'prestacion-eliminar', id: idFicha, ...(typeof fila === 'number' ? { fila } : { idRegistro: fila }) });
       if (r.success) {
         toast('✅ Prestación eliminada');
         if (fichaActual && fichaActual.id === idFicha) {

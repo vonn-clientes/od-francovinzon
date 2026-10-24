@@ -59,6 +59,7 @@ import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busq
 import { crearFichaSupabase } from '../../lib/crearFichaSupabase.js';
 import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
 import { guardarRecetaSupabase, listarRecetasSupabase, descargarRecetaSupabase, guardarTemporalReceta, leerTemporalReceta, borrarTemporalReceta } from '../../lib/recetasSupabase.js';
+import { saludSupabase } from '../../lib/consolidadosSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -109,7 +110,7 @@ export default async function handler(req, res) {
       const offset = parseInt(req.query.offset || '0', 10) || 0;
       const r = await recalcularAsistencia({ dryRun: false, maxFichas, offset });
       let supabase;
-      if (process.env.SUPABASE_SYNC_ON_WRITE === '1') {
+      if (process.env.SUPABASE_SYNC_ON_WRITE === '1' && process.env.SUPABASE_WRITES_PRIMARY !== '1') {
         try {
           const resumen = await sincronizarDelta({ limite: 40 });
           let turnos;
@@ -322,6 +323,16 @@ async function healthcheck(req, res) {
   }
 
   const resultados = {};
+
+  if (process.env.SUPABASE_WRITES_PRIMARY === '1') {
+    const asistencia = await recalcularAsistencia({ dryRun: false, soloSupabase: true });
+    resultados.asistencia = asistencia.error ? 'error' : 'ok';
+    const salud = await saludSupabase();
+    resultados.supabase = salud ? 'ok' : 'error';
+    if (salud) resultados.conteos = salud;
+    const huboFalloSupabase = resultados.asistencia === 'error' || resultados.supabase === 'error';
+    return res.status(huboFalloSupabase ? 500 : 200).json({ ok: !huboFalloSupabase, ...resultados, hora: new Date().toISOString() });
+  }
 
   try {
     // getHorariosLibresDia() ya reintenta internamente su propia llamada a Calendar

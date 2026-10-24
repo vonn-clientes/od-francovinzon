@@ -60,6 +60,7 @@ import { crearFichaSupabase } from '../../lib/crearFichaSupabase.js';
 import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
 import { guardarRecetaSupabase, listarRecetasSupabase, descargarRecetaSupabase, guardarTemporalReceta, leerTemporalReceta, borrarTemporalReceta } from '../../lib/recetasSupabase.js';
 import { saludSupabase } from '../../lib/consolidadosSupabase.js';
+import { crearRespaldoDiario } from '../../lib/respaldoSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -330,6 +331,13 @@ async function healthcheck(req, res) {
     const salud = await saludSupabase();
     resultados.supabase = salud ? 'ok' : 'error';
     if (salud) resultados.conteos = salud;
+    try {
+      const respaldo = await crearRespaldoDiario();
+      resultados.respaldo = respaldo.ok ? 'ok' : 'error';
+    } catch (error) {
+      resultados.respaldo = 'error';
+      await avisarFallo({ endpoint: 'healthcheck', detalle: 'Respaldo diario Supabase', error });
+    }
     const huboFalloSupabase = resultados.asistencia === 'error' || resultados.supabase === 'error';
     return res.status(huboFalloSupabase ? 500 : 200).json({ ok: !huboFalloSupabase, ...resultados, hora: new Date().toISOString() });
   }
@@ -424,7 +432,7 @@ async function listarArchivosPacientesConModifiedTime(drive) {
 
 async function listar(req, res) {
   const supabase = await listarPacientesSupabase();
-  if (supabase?.length) {
+  if (supabase !== null) {
     const pacientes = supabase.map((p) => ({ id: p.id, nombre: p.nombre, apellido: p.apellido, dni: p.dni }))
       .sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
     return res.status(200).json(pacientes);
@@ -450,12 +458,12 @@ async function buscarPublico(req, res) {
   if (q.length < 2) return res.status(200).json([]);
 
   const supabase = await buscarPacientesSupabase(q, { limite: 500 });
-  if (supabase?.length) {
+  if (supabase !== null) {
     const qDigits = q.replace(/\D/g, '');
     const resultados = supabase.map((p) => ({ id: p.id, nombre: p.nombre, apellido: p.apellido, dni: p.dni }))
       .filter((p) => normalizarTexto(`${p.nombre} ${p.apellido}`).includes(q) || (qDigits && normalizarDni(p.dni).includes(qDigits)))
       .sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es')).slice(0, 15);
-    if (resultados.length) return res.status(200).json(resultados);
+    return res.status(200).json(resultados);
   }
 
   const drive = getPacientesDriveClient();
@@ -503,7 +511,7 @@ async function hoyPublico(req, res) {
       .sort((a, b) => new Date(a.start.dateTime) - new Date(b.start.dateTime));
 
     const supabase = await listarPacientesSupabase();
-    const fichas = supabase?.length
+    const fichas = supabase !== null
       ? supabase.map(({ id, nombre, apellido, dni }) => ({ id, nombre, apellido, dni }))
       : (await listarArchivosPacientes(getPacientesDriveClient())).map((f) => {
         const { nombre, apellido, dni } = parsearNombreArchivo(f.name);

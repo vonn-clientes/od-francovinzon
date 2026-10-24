@@ -16,3 +16,4 @@ import './tramo5.test.js';
 import './recetasSupabase.test.js';
 import './agendaSupabase.test.js';
 import './consolidadosSupabase.test.js';
+import './tramo9.test.js';

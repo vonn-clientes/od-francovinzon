@@ -728,6 +728,7 @@ async function escanearFichasAdmin(forzar = false) {
       try { const resultado = await escanearFichasDesdeSupabase(); if (resultado?.fichas?.length) return resultado; }
       catch (err) { console.warn('[admin.js] escaneo desde Supabase falló, uso Google:', err?.message || err); }
     }
+    if (escrituraPrimariaActiva()) return { fichas: [], total: 0, fallidos: 0, ultimoError: '', origen: 'supabase' };
     const drive = getPacientesDriveClient();
     const sheets = getPacientesSheetsClient();
     let archivos = [];
@@ -1246,7 +1247,7 @@ async function getSinFicha(req, res) {
   // pasaron por una edición que las sincronice. Completar sus identidades desde los
   // nombres de archivo de Drive (sin leer las hojas) para no ocultar coincidencias.
   let archivos = [];
-  try {
+  if (!escrituraPrimariaActiva()) try {
     const drive = getPacientesDriveClient();
     let pageToken;
     do {
@@ -1466,6 +1467,11 @@ async function exportPacientesCsv(req, res) {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename=\"pacientes.csv\"');
       return res.status(200).send('﻿' + csv);
     }
+  }
+  if (escrituraPrimariaActiva()) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="pacientes.csv"');
+    return res.status(200).send('\uFEFFNombre,Apellido,DNI');
   }
   const drive = getPacientesDriveClient();
   const { data } = await conReintentos(() => drive.files.list({
@@ -1759,6 +1765,13 @@ async function exportPacientesCompleto(req, res) {
       if (formato === 'md') { res.setHeader('Content-Type', 'text/markdown; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename=\"pacientes_${hoyStr}.md\"`); return res.status(200).send(crearMarkdown(hojas, { generado: hoyStr })); }
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', `attachment; filename=\"pacientes_${hoyStr}.xlsx\"`); return res.status(200).send(Buffer.from(crearXlsx(hojas)));
     }
+  }
+  if (escrituraPrimariaActiva()) {
+    const hoyStr = formatArgDay(new Date());
+    const hojas = armarHojas({ fichas: [], consolidados: [] });
+    res.setHeader('Cache-Control', 'no-store');
+    if (formato === 'md') { res.setHeader('Content-Type', 'text/markdown; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="pacientes_${hoyStr}.md"`); return res.status(200).send(crearMarkdown(hojas, { generado: hoyStr })); }
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', `attachment; filename="pacientes_${hoyStr}.xlsx"`); return res.status(200).send(Buffer.from(crearXlsx(hojas)));
   }
   const drive = getPacientesDriveClient();
   const sheets = getPacientesSheetsClient();

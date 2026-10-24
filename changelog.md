@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-24 — Tramo 9: config/actividad/alertas sin Google y respaldo diario propio (con SUPABASE_WRITES_PRIMARY=1)
+- `lib/adminConfig.js`: configuración, actividad y alertas usan solo Supabase (RPC existentes), sin tocar la planilla de Google.
+- `lib/respaldoSupabase.js` + RPC `consultorio_exportar_respaldo`: el cron diario sube un `YYYY-MM-DD.json.gz` (pacientes con ficha completa, turnos, bloqueos, consolidados, configuración, archivos) al bucket privado `respaldos` y conserva los últimos 14. Fallo = alerta por mail, no rompe el healthcheck.
+
 ## 2026-10-24 — Tramo 8: consolidado, asistencia y confirmación automática sin Google
 - Tabla `consultorio.consolidados` (importada de la copia del consolidado: 384 filas) con RPC `consultorio_consolidados_*`; con `SUPABASE_WRITES_PRIMARY=1` el consolidado (email, asistencia, visitas) y el recálculo de asistencia viven en Supabase. El cron `healthcheck` pasa a recalcular asistencia y chequear Supabase (`consultorio_tramo8_health`) sin tocar Drive/Calendar/Sheets. Con `SUPABASE_AGENDA_PRIMARY=1`, la confirmación automática por movimiento lee/confirma turnos en Supabase (Calendar solo como espejo).
 - `consultorio_sync_ficha` ya no pisa fichas con ediciones en Supabase (`ficha_version>0`); `saldo_ars` se recalcula por trigger desde `ficha_json`.

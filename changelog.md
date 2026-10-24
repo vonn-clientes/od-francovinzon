@@ -729,3 +729,6 @@ sin píldora; si no, redondeo de turnosAsistidos/turnosPasados.
 lectura de Google y se reintentó). Verificado en planilla (muestreo): Pamela Barral 2/2,
 Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo actualizado.
 
+
+## 2026-10-24 — Fix: `escrituraPrimariaActiva()` sin argumento siempre daba false
+- `lib/escrituraPrimaria.js`: el default de `env` pasa de `{}` a `process.env`. Los llamados sin argumento (`lib/adminConfig.js`, `api/gestion/admin.js`) nunca detectaban `SUPABASE_WRITES_PRIMARY`, así que config/logs/horarios seguían cayendo a Google. Detectado con el harness "sin Google". Tests: 119/119.

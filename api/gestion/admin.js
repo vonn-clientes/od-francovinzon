@@ -28,6 +28,8 @@ import { listarPacientesConsolidados, upsertPacienteConsolidado, asignarFilaAFic
 import { normalizarTelefonoMapeo, normalizarDni } from '../../lib/pacientesSheet.js';
 import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
+import { escrituraPrimariaActiva } from '../../lib/escrituraPrimaria.js';
+import { leerFichaSupabase, leerMovimientosSupabase } from '../../lib/fichaDesdeSupabase.js';
 
 // Config de solo-lectura que también necesita /pacientes y /gestion (listas
 // desplegables, radios, plantilla de WhatsApp) — no son datos sensibles, así que
@@ -446,6 +448,18 @@ async function getMonitoreo(req, res) {
   }
 
   try {
+    if (escrituraPrimariaActiva(process.env)) {
+      const base = String(process.env.SUPABASE_URL).replace(/\/$/, '');
+      const headers = { apikey: process.env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY}`, Prefer: 'count=exact', 'Accept-Profile': 'consultorio' };
+      const [p, m] = await Promise.all([
+        fetch(`${base}/rest/v1/pacientes?select=id&limit=1`, { headers }),
+        fetch(`${base}/rest/v1/movimientos?select=sincronizado_en&order=sincronizado_en.desc&limit=1`, { headers }),
+      ]);
+      if (!p.ok || !m.ok) throw new Error('No se pudo consultar el estado de Supabase');
+      const pacientes = await p.json(); const movimientos = await m.json();
+      resultados.pacientes = 'ok';
+      resultados.supabase = { fichas: Number(p.headers.get('content-range')?.split('/')[1]) || pacientes.length, movimientos: Number(m.headers.get('content-range')?.split('/')[1]) || null, ultimaSincronizacion: movimientos[0]?.sincronizado_en || null };
+    } else {
     const drive = getPacientesDriveClient();
     await conReintentos(() => drive.files.list({
       q: `'${PACIENTES_FOLDER_ID}' in parents and trashed = false`,
@@ -453,6 +467,7 @@ async function getMonitoreo(req, res) {
       pageSize: 1,
     }));
     resultados.pacientes = 'ok';
+    }
   } catch (err) {
     resultados.pacientes = 'error';
     resultados.pacientesError = err?.message || String(err);
@@ -1540,6 +1555,16 @@ async function exportFichaPdf(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ success: false, message: 'Falta id.' });
 
+  const ficha = await leerFichaSupabase(id);
+  if (ficha) {
+    const movimientosDb = await leerMovimientosSupabase(id);
+    const movimientos = (movimientosDb || ficha.movimientos || []).map((m) => ({ fecha: m.fecha || '', tratamiento: m.tratamiento || '', debe: m.debe || '', haber: m.haber || '', saldo: m.saldo || '', formaPago: m.formaPago || m.forma_pago || '' })).filter((m) => m.fecha || m.tratamiento);
+    const campos = Object.fromEntries(['nombre','apellido','dni','fechaNacimiento','domicilio','localidad','obraSocial','nAfiliado','plan','telefono','planTratamiento'].map((k) => [k, ficha.campos?.[k] || '']));
+    const { generarPdfFicha } = await import('../../lib/pdfExport.js');
+    const buffer = await generarPdfFicha({ campos, financiero: ficha.financiero || {}, movimientos, mostrarFormaPago: true });
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoSeguro(campos.nombre)}_${nombreArchivoSeguro(campos.apellido)}_ficha.pdf"`);
+    return res.status(200).send(buffer);
+  }
   const sheets = getPacientesSheetsClient();
   const [campos, financiero, movRaw] = await Promise.all([
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C5:C15` })),
@@ -1572,6 +1597,15 @@ async function exportFinancieroPdf(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ success: false, message: 'Falta id.' });
 
+  const ficha = await leerFichaSupabase(id);
+  if (ficha) {
+    const movimientosDb = await leerMovimientosSupabase(id);
+    const movimientos = (movimientosDb || ficha.movimientos || []).map((m) => ({ fecha: m.fecha || '', tratamiento: m.tratamiento || '', debe: m.debe || '', haber: m.haber || '', saldo: m.saldo || '' })).filter((m) => m.fecha || m.tratamiento);
+    const { generarPdfFicha } = await import('../../lib/pdfExport.js');
+    const buffer = await generarPdfFicha({ campos: { nombre: ficha.campos?.nombre || '', apellido: ficha.campos?.apellido || '' }, movimientos, mostrarFormaPago: false, soloFinanciero: true });
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoSeguro(ficha.campos?.nombre)}_${nombreArchivoSeguro(ficha.campos?.apellido)}_estado_cuenta.pdf"`);
+    return res.status(200).send(buffer);
+  }
   const sheets = getPacientesSheetsClient();
   const [campos, movRaw] = await Promise.all([
     conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C5:C6` })),

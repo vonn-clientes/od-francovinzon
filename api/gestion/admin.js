@@ -449,16 +449,10 @@ async function getMonitoreo(req, res) {
 
   try {
     if (escrituraPrimariaActiva(process.env)) {
-      const base = String(process.env.SUPABASE_URL).replace(/\/$/, '');
-      const headers = { apikey: process.env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY}`, Prefer: 'count=exact', 'Accept-Profile': 'consultorio' };
-      const [p, m] = await Promise.all([
-        fetch(`${base}/rest/v1/pacientes?select=id&limit=1`, { headers }),
-        fetch(`${base}/rest/v1/movimientos?select=sincronizado_en&order=sincronizado_en.desc&limit=1`, { headers }),
-      ]);
-      if (!p.ok || !m.ok) throw new Error('No se pudo consultar el estado de Supabase');
-      const pacientes = await p.json(); const movimientos = await m.json();
+      const estado = await rpcAdmin('consultorio_monitoreo', {}, { timeoutMs: 4000 });
+      if (!estado) throw new Error('No se pudo consultar el estado de Supabase');
       resultados.pacientes = 'ok';
-      resultados.supabase = { fichas: Number(p.headers.get('content-range')?.split('/')[1]) || pacientes.length, movimientos: Number(m.headers.get('content-range')?.split('/')[1]) || null, ultimaSincronizacion: movimientos[0]?.sincronizado_en || null };
+      resultados.supabase = { fichas: estado.fichas, fichasConJson: estado.fichas_con_json, movimientos: estado.movimientos, ultimaSincronizacion: estado.ultima_sincronizacion, pendientesDeEspejo: estado.outbox_pendiente };
     } else {
     const drive = getPacientesDriveClient();
     await conReintentos(() => drive.files.list({

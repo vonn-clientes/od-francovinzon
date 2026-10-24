@@ -55,6 +55,7 @@ import { ACCIONES_SOMBRA, leerAntesSombra, registrarSombra } from '../../lib/som
 import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
 import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
 import { aplicarEnSupabase, escrituraPrimariaActiva, ejecutarEscrituraPrimaria } from '../../lib/escrituraPrimaria.js';
+import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -408,6 +409,12 @@ async function listarArchivosPacientesConModifiedTime(drive) {
 }
 
 async function listar(req, res) {
+  const supabase = await listarPacientesSupabase();
+  if (supabase?.length) {
+    const pacientes = supabase.map((p) => ({ id: p.id, nombre: p.nombre, apellido: p.apellido, dni: p.dni }))
+      .sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
+    return res.status(200).json(pacientes);
+  }
   const drive = getPacientesDriveClient();
   const archivos = await listarArchivosPacientes(drive);
 
@@ -427,6 +434,15 @@ async function listar(req, res) {
 async function buscarPublico(req, res) {
   const q = normalizarTexto((req.query.q || '').trim());
   if (q.length < 2) return res.status(200).json([]);
+
+  const supabase = await buscarPacientesSupabase(q, { limite: 500 });
+  if (supabase?.length) {
+    const qDigits = q.replace(/\D/g, '');
+    const resultados = supabase.map((p) => ({ id: p.id, nombre: p.nombre, apellido: p.apellido, dni: p.dni }))
+      .filter((p) => normalizarTexto(`${p.nombre} ${p.apellido}`).includes(q) || (qDigits && normalizarDni(p.dni).includes(qDigits)))
+      .sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es')).slice(0, 15);
+    if (resultados.length) return res.status(200).json(resultados);
+  }
 
   const drive = getPacientesDriveClient();
   const archivos = await listarArchivosPacientes(drive);
@@ -472,18 +488,23 @@ async function hoyPublico(req, res) {
       .filter((ev) => ev.start.dateTime && !(ev.description || '').includes(BLOCK_MARKER))
       .sort((a, b) => new Date(a.start.dateTime) - new Date(b.start.dateTime));
 
-    const drive = getPacientesDriveClient();
-    const archivos = await listarArchivosPacientes(drive);
-    const fichas = archivos.map((f) => {
-      const { nombre, apellido } = parsearNombreArchivo(f.name);
-      return { id: f.id, nombre, apellido };
-    });
+    const supabase = await listarPacientesSupabase();
+    const fichas = supabase?.length
+      ? supabase.map(({ id, nombre, apellido, dni }) => ({ id, nombre, apellido, dni }))
+      : (await listarArchivosPacientes(getPacientesDriveClient())).map((f) => {
+        const { nombre, apellido, dni } = parsearNombreArchivo(f.name);
+        return { id: f.id, nombre, apellido, dni };
+      });
 
     const vistos = new Set();
     const resultado = [];
     eventos.forEach((ev) => {
       const nombreTurno = normalizarTexto(ev.summary || '');
-      const ficha = fichas.find((p) => !vistos.has(p.id) && normalizarTexto(`${p.nombre} ${p.apellido}`) === nombreTurno);
+      const dniTurno = normalizarDni(extraerDni(ev.description || ''));
+      const ficha = fichas.find((p) => !vistos.has(p.id) && (
+        normalizarTexto(`${p.nombre} ${p.apellido}`) === nombreTurno ||
+        (dniTurno && normalizarDni(p.dni) === dniTurno)
+      ));
       if (!ficha) return;
       vistos.add(ficha.id);
       resultado.push({ id: ficha.id, nombre: ficha.nombre, apellido: ficha.apellido, hora: formatArgTime(new Date(ev.start.dateTime)) });

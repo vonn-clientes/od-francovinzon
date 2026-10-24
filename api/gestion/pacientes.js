@@ -54,7 +54,7 @@ import { firmarToken, verificarToken, secretoAutoficha, CAMPOS_AUTOFICHA, vistaP
 import { ACCIONES_SOMBRA, leerAntesSombra, registrarSombra } from '../../lib/sombraEscrituras.js';
 import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
 import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
-import { aplicarEnSupabase, escrituraPrimariaActiva, ejecutarEscrituraPrimaria } from '../../lib/escrituraPrimaria.js';
+import { aplicarEnSupabase, fusionarEnSupabase, escrituraPrimariaActiva, ejecutarEscrituraPrimaria } from '../../lib/escrituraPrimaria.js';
 import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
 import { crearFichaSupabase } from '../../lib/crearFichaSupabase.js';
 import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
@@ -1586,8 +1586,23 @@ async function fusionarPacientes(req, res) {
   if (!idMantener || !idEliminar || idMantener === idEliminar) {
     return res.status(400).json({ success: false, message: 'Fichas inválidas para fusionar.' });
   }
+  if (escrituraPrimariaActiva(process.env)) {
+    let resultado;
+    try {
+      const decision = await ejecutarEscrituraPrimaria({
+        activa: true,
+        aplicar: () => fusionarEnSupabase({ destino: idMantener, origen: idEliminar, campos }),
+        escribirGoogle: async () => null,
+      });
+      resultado = decision.resultado;
+      if (decision.ruta === 'supabase' && resultado?.ok) return res.status(200).json({ success: true, id: idMantener, version: resultado.version });
+      if (decision.ruta !== 'google') return res.status(503).json({ success: false, message: 'No pudimos confirmar la fusión en Supabase. Reintentá luego.' });
+    } catch {
+      return res.status(503).json({ success: false, message: 'No pudimos confirmar la fusión en Supabase. Reintentá luego.' });
+    }
+  }
   if (String(idMantener).startsWith('sb-') || String(idEliminar).startsWith('sb-')) {
-    return res.status(400).json({ success: false, message: 'La fusión de fichas Supabase todavía no está disponible.' });
+    return res.status(503).json({ success: false, message: 'Supabase no está disponible para fusionar estas fichas.' });
   }
 
   const sheets = getPacientesSheetsClient();

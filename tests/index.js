@@ -12,3 +12,4 @@ import './escrituraPrimaria.test.js';
 import './fichaDesdeSupabase.test.js';
 import './busquedaSupabase.test.js';
 import './crearFichaSupabase.test.js';
+import './tramo5.test.js';

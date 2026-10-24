@@ -9,6 +9,7 @@ import { getPacientesSheetsClient, getPacientesDriveClient } from '../../lib/goo
 import { esFeriado } from '../../lib/feriados.js';
 import { conReintentos } from '../../lib/retry.js';
 import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
+import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
 
 const MESES_RANGO = 6;
 const TTL_DNI_FICHA_TAREAS = 2 * 60 * 1000;
@@ -19,6 +20,7 @@ function claveNombreTarea(nombre) {
 }
 
 async function leerDniFichaTarea(sheets, fichaId) {
+  if (String(fichaId).startsWith('sb-')) return (await leerFichaSupabase(fichaId))?.campos?.dni || '';
   const previo = cacheDniFichaTareas.get(fichaId);
   if (previo && Date.now() - previo.ts < TTL_DNI_FICHA_TAREAS) return previo.dni;
   const { data } = await conReintentos(() => sheets.spreadsheets.values.get({
@@ -694,7 +696,7 @@ async function perfilPaciente(req, res) {
     if (paciente.ficha_json && Array.isArray(paciente.ficha_json.prestacionesObraSocial)) {
       prestaciones = paciente.ficha_json.prestacionesObraSocial.slice(-8).reverse();
     }
-    if (paciente.fichaId && !paciente.ficha_json) {
+    if (paciente.fichaId && !String(paciente.fichaId).startsWith('sb-') && !paciente.ficha_json) {
       try {
         const sheets = getPacientesSheetsClient();
         const { data: pres } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: paciente.fichaId, range: rangoPrestacionesObraSocial() }));

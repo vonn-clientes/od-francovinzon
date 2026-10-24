@@ -56,6 +56,8 @@ import { construirRespuestaFicha } from '../../lib/respuestaFicha.js';
 import { debeIntentarLecturaSupabase, fichaSupabaseFresca } from '../../lib/lecturasSupabase.js';
 import { aplicarEnSupabase, escrituraPrimariaActiva, ejecutarEscrituraPrimaria } from '../../lib/escrituraPrimaria.js';
 import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
+import { crearFichaSupabase } from '../../lib/crearFichaSupabase.js';
+import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -238,7 +240,7 @@ async function despacharPost(req, res) {
   proxy.status = (code) => { status = code; return proxy; };
   proxy.json = (value) => { body = value; capturado = true; return proxy; };
   proxy.send = (value) => { body = value; capturado = true; return proxy; };
-  const clienteSombra = ACCIONES_SOMBRA.has(accion) && req.body.id ? crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY }) : null;
+  const clienteSombra = ACCIONES_SOMBRA.has(accion) && req.body.id && !String(req.body.id).startsWith('sb-') ? crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY }) : null;
   const antesSombra = clienteSombra ? await leerAntesSombra(clienteSombra, req.body.id) : null;
   try {
     await despacharPostOriginal(req, proxy);
@@ -283,7 +285,7 @@ async function despacharPostOriginal(req, res) {
 
 let cotizacionCache = { valor: 0, vence: 0 };
 async function espejarFichaBestEffort(id) {
-  if (process.env.SUPABASE_SYNC_ON_WRITE !== '1' || !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !id) return;
+  if (String(id || '').startsWith('sb-') || process.env.SUPABASE_SYNC_ON_WRITE !== '1' || !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !id) return;
   try {
     await conTimeout((async () => {
       let cotizacionFallback = cotizacionCache.vence > Date.now() ? cotizacionCache.valor : 0;
@@ -570,6 +572,15 @@ async function obtenerFicha(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Falta id.' });
 
+  if (String(id).startsWith('sb-')) {
+    const ficha = await leerFichaSupabase(id);
+    if (!ficha) return res.status(503).json({ error: 'No pudimos leer la ficha en Supabase.' });
+    res.setHeader('X-Fuente', 'supabase');
+    return res.status(200).json({ ...ficha, id, driveModifiedTime: ficha.driveModifiedTime || null,
+      movimientos: (ficha.movimientos || []).map((x) => ({ ...x, idRegistro: x.idRegistro || x.id })),
+      prestacionesObraSocial: (ficha.prestacionesObraSocial || []).map((x) => ({ ...x, idRegistro: x.idRegistro || x.id })) });
+  }
+
   const sheets = getPacientesSheetsClient();
   const drive = getPacientesDriveClient();
 
@@ -625,6 +636,11 @@ async function obtenerFicha(req, res) {
 
 // Devuelve false solo cuando corresponde ejecutar el camino Google existente.
 async function intentarEscrituraFicha(id, accion, body, res, respuestaOk) {
+  const soloSupabase = String(id || '').startsWith('sb-');
+  if (soloSupabase && !escrituraPrimariaActiva(process.env)) {
+    res.status(503).json({ success: false, message: 'La ficha requiere Supabase para guardarse.' });
+    return true;
+  }
   let decision;
   try {
     decision = await ejecutarEscrituraPrimaria({
@@ -633,7 +649,7 @@ async function intentarEscrituraFicha(id, accion, body, res, respuestaOk) {
       escribirGoogle: async () => null,
     });
   } catch { decision = { ruta: 'rechazada', resultado: { ok: false, motivo: 'ambiguo' } }; }
-  if (decision.ruta === 'google') return false;
+  if (decision.ruta === 'google' && !soloSupabase) return false;
   const resultado = decision.resultado;
   if (!resultado.ok) {
     const mensaje = resultado.motivo === 'invalido' ? resultado.mensaje
@@ -811,6 +827,11 @@ async function sincronizarSupabaseModo(req, res) {
 // ---------- "Mis datos" (autoficha por QR) ----------
 const AUTOFICHA_ORDEN = ['nombre', 'apellido', 'dni', 'fechaNacimiento', 'domicilio', 'localidad', 'obraSocial', 'nAfiliado', 'plan', 'telefono'];
 async function leerCamposAutoficha(fichaId) {
+  if (String(fichaId).startsWith('sb-')) {
+    const ficha = await leerFichaSupabase(fichaId);
+    if (!ficha) throw new Error('Ficha Supabase no disponible');
+    return Object.fromEntries(AUTOFICHA_ORDEN.map((k) => [k, ficha.campos?.[k] || '']));
+  }
   const sheets = getPacientesSheetsClient();
   const { data } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: fichaId, range: `${SHEET_NAME}!C5:C15` }));
   const c = (data.values || []).map((r) => (r[0] != null ? String(r[0]) : ''));
@@ -858,7 +879,14 @@ async function autofichaGuardar(req, res) {
     }
     if (Object.keys(errores).length) return res.status(400).json({ ok: false, errores });
     if (!cambios.length) return res.status(200).json({ ok: true, guardados: [] });
-    for (const { campo, valor } of cambios) await escribirCampoEnSheet(v.fichaId, campo, valor);
+    if (String(v.fichaId).startsWith('sb-')) {
+      for (const { campo, valor } of cambios) {
+        const r = await aplicarEnSupabase({ id: v.fichaId, accion: 'actualizar-campo', body: { campo, valor }, ahora: new Date() });
+        if (!r.ok) return res.status(503).json({ ok: false, error: 'No se pudieron guardar los datos.' });
+      }
+    } else {
+      for (const { campo, valor } of cambios) await escribirCampoEnSheet(v.fichaId, campo, valor);
+    }
     await espejarFichaBestEffort(v.fichaId);
     logActividad({ tipo: 'autoficha', detalle: `Paciente completó sus datos (${cambios.map((c) => c.campo).join(', ')})`, actor: 'paciente-qr' }).catch(() => {});
     return res.status(200).json({ ok: true, guardados: cambios.map((c) => c.campo) });
@@ -869,7 +897,7 @@ async function autofichaGuardar(req, res) {
 }
 // Editor de datos personales para la secretaria (/datosqr y /gestion): mismos campos que
 // "Mis datos", pero con GESTION_KEY y TODOS editables (también nombre, apellido y DNI).
-function fichaIdValido(id) { return /^[A-Za-z0-9_-]{20,80}$/.test(String(id || '')); }
+function fichaIdValido(id) { return /^sb-[A-Za-z0-9_-]{1,77}$/.test(String(id || '')) || /^[A-Za-z0-9_-]{20,80}$/.test(String(id || '')); }
 async function datosFichaLeer(req, res) {
   if (!claveValida(req.query.key)) return res.status(401).json({ error: 'unauthorized' });
   const fichaId = String(req.query.fichaId || '');
@@ -897,7 +925,14 @@ async function datosFichaGuardar(req, res) {
     }
     if (Object.keys(errores).length) return res.status(400).json({ ok: false, errores });
     if (!cambios.length) return res.status(200).json({ ok: true, guardados: [] });
-    for (const { campo, valor } of cambios) await escribirCampoEnSheet(fichaId, campo, valor);
+    if (String(fichaId).startsWith('sb-')) {
+      for (const { campo, valor } of cambios) {
+        const r = await aplicarEnSupabase({ id: fichaId, accion: 'actualizar-campo', body: { campo, valor }, ahora: new Date() });
+        if (!r.ok) return res.status(503).json({ ok: false, error: 'No se pudieron guardar los datos.' });
+      }
+    } else {
+      for (const { campo, valor } of cambios) await escribirCampoEnSheet(fichaId, campo, valor);
+    }
     await espejarFichaBestEffort(fichaId);
     logActividad({ tipo: 'datos-ficha', detalle: `Secretaria editó datos (${cambios.map((c) => c.campo).join(', ')})`, actor: 'gestion' }).catch(() => {});
     return res.status(200).json({ ok: true, guardados: cambios.map((c) => c.campo) });
@@ -906,8 +941,16 @@ async function datosFichaGuardar(req, res) {
 async function autofichaToken(req, res) {
   if (!claveValida(req.body?.key)) return res.status(401).json({ error: 'unauthorized' });
   const fichaId = String(req.body?.fichaId || '');
-  if (!/^[A-Za-z0-9_-]{20,80}$/.test(fichaId)) return res.status(400).json({ error: 'Ficha inválida.' });
+  if (!fichaIdValido(fichaId)) return res.status(400).json({ error: 'Ficha inválida.' });
   try {
+    if (fichaId.startsWith('sb-')) {
+      if (!await leerFichaSupabase(fichaId)) return res.status(404).json({ error: 'Ficha no encontrada.' });
+      const token = firmarToken({ fichaId, secreto: secretoAutoficha(process.env.GESTION_KEY) });
+      const host = String(req.headers.host || '');
+      const base = /^od-francovinzon[a-z0-9-]*\.vercel\.app$/.test(host) ? `https://${host}` : 'https://od-francovinzon.vercel.app';
+      res.setHeader('Cache-Control', 'no-store, private');
+      return res.status(200).json({ url: `${base}/mis-datos/?t=${token}` });
+    }
     const drive = getPacientesDriveClient();
     const { data } = await conReintentos(() => drive.files.get({ fileId: fichaId, fields: 'id,parents,trashed' }));
     if (data.trashed || !(data.parents || []).includes(PACIENTES_FOLDER_ID)) return res.status(404).json({ error: 'Ficha no encontrada.' });
@@ -1047,6 +1090,11 @@ async function sincronizarDelta({ limite = 5 } = {}) {
 async function obtenerTelefonoFicha(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Falta id.' });
+  if (String(id).startsWith('sb-')) {
+    const ficha = await leerFichaSupabase(id);
+    if (!ficha) return res.status(503).json({ error: 'Ficha no disponible.' });
+    return res.status(200).json({ telefono: String(ficha.campos?.telefono || '') });
+  }
   const sheets = getPacientesSheetsClient();
   const { data } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C14` }));
   const telefono = data.values?.[0]?.[0] || '';
@@ -1056,6 +1104,7 @@ async function obtenerTelefonoFicha(req, res) {
 async function obtenerModified(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'Falta id.' });
+  if (String(id).startsWith('sb-')) return res.status(200).json({ modifiedTime: null });
   const drive = getPacientesDriveClient();
   const { data } = await conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime' }));
   res.status(200).json({ modifiedTime: data.modifiedTime });
@@ -1284,9 +1333,16 @@ async function confirmarMatch(req, res) {
     }
 
     if (decision === 'si' && turnoTitulo) {
-      const sheets = getPacientesSheetsClient();
-      const { data } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: fichaId, range: `${SHEET_NAME}!C5:C6` }));
-      const [nombreFicha = '', apellidoFicha = ''] = (data.values || []).map((r) => r[0] || '');
+      let nombreFicha = '', apellidoFicha = '';
+      if (String(fichaId).startsWith('sb-')) {
+        const ficha = await leerFichaSupabase(fichaId);
+        if (!ficha) return res.status(503).json({ success: false, message: 'No se pudo leer la ficha.' });
+        nombreFicha = ficha.campos?.nombre || ''; apellidoFicha = ficha.campos?.apellido || '';
+      } else {
+        const sheets = getPacientesSheetsClient();
+        const { data } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: fichaId, range: `${SHEET_NAME}!C5:C6` }));
+        [nombreFicha, apellidoFicha] = (data.values || []).map((r) => r[0] || '');
+      }
       const nombreCompletoFicha = `${nombreFicha} ${apellidoFicha}`.trim();
       const turno = (turnoTitulo || '').trim();
 
@@ -1294,8 +1350,14 @@ async function confirmarMatch(req, res) {
         const partes = turno.split(/\s+/);
         const nuevoNombre = partes.shift() || '';
         const nuevoApellido = partes.join(' ');
-        await escribirCampoEnSheet(fichaId, 'nombre', nuevoNombre);
-        await escribirCampoEnSheet(fichaId, 'apellido', nuevoApellido);
+        if (String(fichaId).startsWith('sb-')) {
+          const n = await aplicarEnSupabase({ id: fichaId, accion: 'actualizar-campo', body: { campo: 'nombre', valor: nuevoNombre } });
+          const a = n.ok ? await aplicarEnSupabase({ id: fichaId, accion: 'actualizar-campo', body: { campo: 'apellido', valor: nuevoApellido } }) : n;
+          if (!a.ok) return res.status(503).json({ success: false, message: 'No se pudo actualizar la ficha.' });
+        } else {
+          await escribirCampoEnSheet(fichaId, 'nombre', nuevoNombre);
+          await escribirCampoEnSheet(fichaId, 'apellido', nuevoApellido);
+        }
       } else if (nombreCompletoFicha && esMasCompleto(nombreCompletoFicha, turno) && eventId && calendarId) {
         const calendar = getCalendarClient();
         await conReintentos(() => calendar.events.patch({
@@ -1330,6 +1392,20 @@ async function crearPaciente(req, res) {
 // (ver el pedido, 2026-08-20) reusando este mismo camino, sin duplicar la lógica de
 // copiar la plantilla / detectar duplicados por DNI / cargar los campos iniciales.
 async function crearPacienteInterno({ nombre, apellido, campos = {} }) {
+  if (escrituraPrimariaActiva(process.env)) {
+    const creada = await crearFichaSupabase({ nombre, apellido, campos });
+    if (creada?.ok) return { success: true, id: creada.id, nombre: aTituloCase(nombre), apellido: aTituloCase(apellido) };
+    if (creada?.motivo === 'dni_duplicado') {
+      const fichaExistente = await leerFichaSupabase(creada.id).catch(() => null);
+      return { success: false, duplicado: true, id: creada.id,
+        nombre: fichaExistente?.campos?.nombre || aTituloCase(nombre),
+        apellido: fichaExistente?.campos?.apellido || aTituloCase(apellido),
+        message: 'Ya existe una ficha con este DNI.' };
+    }
+    if (creada?.motivo !== 'sin_snapshot') {
+      return { success: false, message: creada?.motivo === 'sin_nombre' ? 'Nombre y apellido son obligatorios.' : 'No se pudo crear la ficha.' };
+    }
+  }
   const drive = getPacientesDriveClient();
   const sheets = getPacientesSheetsClient();
 
@@ -1509,6 +1585,9 @@ async function fusionarPacientes(req, res) {
   const { idMantener, idEliminar, campos } = req.body;
   if (!idMantener || !idEliminar || idMantener === idEliminar) {
     return res.status(400).json({ success: false, message: 'Fichas inválidas para fusionar.' });
+  }
+  if (String(idMantener).startsWith('sb-') || String(idEliminar).startsWith('sb-')) {
+    return res.status(400).json({ success: false, message: 'La fusión de fichas Supabase todavía no está disponible.' });
   }
 
   const sheets = getPacientesSheetsClient();
@@ -2455,7 +2534,10 @@ async function actualizarPacienteCentral(req, res) {
     // 2. Ficha (si existe) — el autosave de la ficha también sincroniza la planilla, no
     // se pisa nada: la ficha es la fuente de verdad para sus propios campos.
     if (paciente.fichaId && ['nombre', 'apellido', 'dni', 'telefono'].includes(campo)) {
-      await escribirCampoEnSheet(paciente.fichaId, campo, valor);
+      if (String(paciente.fichaId).startsWith('sb-')) {
+        const guardado = await aplicarEnSupabase({ id: paciente.fichaId, accion: 'actualizar-campo', body: { campo, valor } });
+        if (!guardado.ok) return res.status(503).json({ success: false, message: 'No se pudo actualizar la ficha.' });
+      } else await escribirCampoEnSheet(paciente.fichaId, campo, valor);
     }
 
     // 3. Turnos futuros del paciente (teléfono/email).

@@ -8,13 +8,14 @@ import { avisarFallo } from '../../lib/alertas.js';
 import { formatearDniConPuntos } from '../../lib/dni.js';
 import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
+import { guardarContacto } from '../../lib/actualizarContactoSupabase.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Método no permitido.' });
   }
 
-  const { key, eventId, calendarId, dni } = req.body;
+  const { key, eventId, calendarId, dni, fichaId } = req.body;
 
   if (!isValidGestionKey(key)) {
     return res.status(401).json({ success: false, message: 'No autorizado.' });
@@ -53,7 +54,7 @@ export default async function handler(req, res) {
       const partesNombre = (ev.summary || '').trim().split(/\s+/);
       const nombre = partesNombre.shift() || '';
       const apellido = partesNombre.join(' ');
-      await upsertPacienteConsolidado({ telefono: extraerTelefono(descActual), nombre, apellido, dni: crudo, origen: 'turno' });
+      await guardarContacto({ fichaId, campo: 'dni', valor: valorGuardar, upsertGoogle: () => upsertPacienteConsolidado({ telefono: extraerTelefono(descActual), nombre, apellido, dni: crudo, origen: 'turno' }) });
     }
 
     await espejarTurnosBestEffort();

@@ -61,6 +61,7 @@ import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
 import { guardarRecetaSupabase, listarRecetasSupabase, descargarRecetaSupabase, guardarTemporalReceta, leerTemporalReceta, borrarTemporalReceta } from '../../lib/recetasSupabase.js';
 import { saludSupabase } from '../../lib/consolidadosSupabase.js';
 import { crearRespaldoDiario } from '../../lib/respaldoSupabase.js';
+import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
 function bufferToStream(buffer) {
@@ -288,6 +289,7 @@ async function despacharPostOriginal(req, res) {
 
 let cotizacionCache = { valor: 0, vence: 0 };
 async function espejarFichaBestEffort(id) {
+  if (escrituraPrimariaActiva(process.env)) return;
   if (String(id || '').startsWith('sb-') || process.env.SUPABASE_SYNC_ON_WRITE !== '1' || !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !id) return;
   try {
     await conTimeout((async () => {
@@ -497,20 +499,28 @@ async function buscarPublico(req, res) {
 // pudiendo buscarse a mano arriba, sin ningún dato perdido).
 async function hoyPublico(req, res) {
   try {
-    const calendar = getCalendarClient();
     const hoyStr = formatArgDay(new Date());
     const desde = toArgDate(hoyStr, '00:00');
     const hasta = new Date(desde.getTime() + 24 * 60 * 60000);
-
-    const [principal, sobreturnos] = await Promise.all([
+    let eventos;
+    if (agendaPrimariaActiva()) {
+      const filas = await eventosAgenda(desde.toISOString(), hasta.toISOString());
+      if (filas === null) return res.status(503).json({ error: 'No se pudo leer la agenda en Supabase.' });
+      eventos = filas.filter((e) => e.__tipo !== 'bloqueo' && e.start?.dateTime).map((e) => ({ id: e.id, summary: e.summary, description: e.description, start: e.start }));
+    } else {
+      const calendar = getCalendarClient();
+      const [principal, sobreturnos] = await Promise.all([
       conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, timeMin: desde.toISOString(), timeMax: hasta.toISOString(), singleEvents: true, maxResults: 200 })),
       conReintentos(() => calendar.events.list({ calendarId: SOBRETURNOS_CALENDAR_ID, timeMin: desde.toISOString(), timeMax: hasta.toISOString(), singleEvents: true, maxResults: 200 })),
-    ]);
-    const eventos = [...(principal.data.items || []), ...(sobreturnos.data.items || [])]
+      ]);
+      eventos = [...(principal.data.items || []), ...(sobreturnos.data.items || [])];
+    }
+    eventos = eventos
       .filter((ev) => ev.start.dateTime && !(ev.description || '').includes(BLOCK_MARKER))
       .sort((a, b) => new Date(a.start.dateTime) - new Date(b.start.dateTime));
 
     const supabase = await listarPacientesSupabase();
+    if (escrituraPrimariaActiva(process.env) && !Array.isArray(supabase)) return res.status(503).json({ error: 'No se pudieron leer pacientes en Supabase.' });
     const fichas = supabase !== null
       ? supabase.map(({ id, nombre, apellido, dni }) => ({ id, nombre, apellido, dni }))
       : (await listarArchivosPacientes(getPacientesDriveClient())).map((f) => {
@@ -535,6 +545,7 @@ async function hoyPublico(req, res) {
     res.status(200).json(resultado);
   } catch (err) {
     console.error(err);
+    if (escrituraPrimariaActiva(process.env)) return res.status(503).json({ error: 'No se pudo leer la agenda o pacientes en Supabase.' });
     res.status(200).json([]);
   }
 }
@@ -601,8 +612,9 @@ async function obtenerFicha(req, res) {
       prestacionesObraSocial: (ficha.prestacionesObraSocial || []).map((x) => ({ ...x, idRegistro: x.idRegistro || x.id })) });
   }
 
-  const sheets = getPacientesSheetsClient();
-  const drive = getPacientesDriveClient();
+  const primaria = escrituraPrimariaActiva(process.env);
+  const sheets = primaria ? null : getPacientesSheetsClient();
+  const drive = primaria ? null : getPacientesDriveClient();
 
   if (debeIntentarLecturaSupabase(process.env.SUPABASE_READS, process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY) || escrituraPrimariaActiva(process.env)) {
     try {
@@ -610,7 +622,7 @@ async function obtenerFicha(req, res) {
         const cliente = crearClienteSupabase({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_KEY });
         const fila = await cliente.leerFicha(id);
         const primaria = escrituraPrimariaActiva(process.env);
-        const necesitaCompararDrive = !primaria || Number(fila?.ficha_version || 0) <= 0;
+        const necesitaCompararDrive = !primaria;
         const driveMeta = necesitaCompararDrive
           ? (await conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime' }))).data
           : null;
@@ -630,11 +642,12 @@ async function obtenerFicha(req, res) {
         };
         return res.status(200).json({ ...fichaConIds, driveModifiedTime: respuesta.driveMeta?.modifiedTime || guardada.driveModifiedTime || respuesta.fila?.drive_modified_time || null });
       }
-      if (Number.isFinite(guardadaTime) && Number.isFinite(actualTime) && actualTime > guardadaTime) {
+      if (!primaria && Number.isFinite(guardadaTime) && Number.isFinite(actualTime) && actualTime > guardadaTime) {
         void espejarFichaBestEffort(id).catch(() => {});
       }
     } catch { /* falla cerrada a Google, igual que antes */ }
   }
+  if (primaria) return res.status(503).json({ error: 'No se pudo leer la ficha en Supabase.' });
   res.setHeader('X-Fuente', 'google');
 
   await intentarRecuperarRespaldos(sheets, drive, id);
@@ -1115,6 +1128,11 @@ async function obtenerTelefonoFicha(req, res) {
     if (!ficha) return res.status(503).json({ error: 'Ficha no disponible.' });
     return res.status(200).json({ telefono: String(ficha.campos?.telefono || '') });
   }
+  if (escrituraPrimariaActiva(process.env)) {
+    const ficha = await leerFichaSupabase(id);
+    if (!ficha) return res.status(503).json({ error: 'No se pudo leer el teléfono en Supabase.' });
+    return res.status(200).json({ telefono: String(ficha.campos?.telefono || '') });
+  }
   const sheets = getPacientesSheetsClient();
   const { data } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: id, range: `${SHEET_NAME}!C14` }));
   const telefono = data.values?.[0]?.[0] || '';
@@ -1174,6 +1192,11 @@ async function completarTelefonoTurno(req, res) {
     return res.status(400).json({ success: false, message: 'Faltan datos.' });
   }
   try {
+    if (agendaPrimariaActiva()) {
+      const resultado = await escribirAgendaRpc('consultorio_agenda_actualizar_contacto', { id: eventId, telefono });
+      if (!resultado?.ok) return res.status(503).json({ success: false, message: resultado?.error || 'No se pudo actualizar el teléfono en Supabase.' });
+      return res.status(200).json({ success: true, telefono });
+    }
     const calendar = getCalendarClient();
     const { data: ev } = await conReintentos(() => calendar.events.get({ calendarId, eventId }));
     if (extraerTelefono(ev.description)) {
@@ -1252,6 +1275,9 @@ async function guardarMapeo(sheets, mapeoId, { telefono, dni, decision }) {
 }
 
 async function obtenerMapeos(req, res) {
+  // El modelo Supabase todavía no tiene una RPC/tabla pública equivalente para
+  // el mapeo teléfono↔ficha. En modo primario respondemos vacío, sin Sheets.
+  if (escrituraPrimariaActiva(process.env)) return res.status(200).json([]);
   const sheets = getPacientesSheetsClient();
   const drive = getPacientesDriveClient();
   const mapeoId = await getOrCreateMapeoSheetId(sheets, drive);
@@ -1276,6 +1302,17 @@ async function calcularCumpleanosHoy(forzar) {
   const hoyDia = parseInt(hoyDiaStr, 10);
 
   const resultado = [];
+  if (escrituraPrimariaActiva(process.env)) {
+    const filas = await listarPacientesSupabase();
+    if (!Array.isArray(filas)) throw new Error('No se pudieron leer pacientes en Supabase.');
+    for (const p of filas) {
+      const f = p.ficha_json?.campos?.fechaNacimiento || '';
+      const partes = String(f).split(/[/-]/);
+      if (partes.length >= 2 && Number(partes[0]) === hoyDia && Number(partes[1]) === hoyMes) resultado.push({ nombre: p.nombre, apellido: p.apellido, fechaNacimiento: f, id: p.id });
+    }
+    cacheCumple = { valor: resultado, ts: Date.now() };
+    return resultado;
+  }
   try {
     const drive = getPacientesDriveClient();
     const sheets = getPacientesSheetsClient();
@@ -1310,8 +1347,13 @@ async function calcularCumpleanosHoy(forzar) {
 }
 
 async function cumpleanosHoy(req, res) {
-  const lista = await calcularCumpleanosHoy(!!req.query.forzar);
-  res.status(200).json(lista);
+  try {
+    const lista = await calcularCumpleanosHoy(!!req.query.forzar);
+    res.status(200).json(lista);
+  } catch (err) {
+    if (escrituraPrimariaActiva(process.env)) return res.status(503).json({ error: 'No se pudieron leer cumpleaños en Supabase.' });
+    throw err;
+  }
 }
 
 // "Más completo" = más palabras: y a igualdad de palabras, más caracteres. Sin lógica

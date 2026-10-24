@@ -141,6 +141,17 @@ async function buscarEmailGuardado(req, res) {
     const dniNorm = String(dni || '').replace(/\D/g, '');
     if (!dniNorm || !telefono) return res.status(200).json({ email: null });
 
+    if (agendaPrimariaActiva()) {
+      const filas = await leerAgendaRpc('consultorio_agenda_buscar_por_dni', { p_dni: dniNorm }, { timeoutMs: 2200 });
+      if (filas !== null) {
+        const candidatos = Array.isArray(filas) ? filas : (filas?.turnos || []);
+        const telNorm = normalizarComparacionTelefono(telefono);
+        const turno = candidatos.find((t) => String(t.dni || '').replace(/\D/g, '') === dniNorm
+          && normalizarComparacionTelefono(t.telefono || '') === telNorm && t.email);
+        return res.status(200).json({ email: turno?.email || null });
+      }
+    }
+
     const calendar = getCalendarClient();
     const [principal, principalPuntos, sobreturnos] = await Promise.all([
       conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, q: dniNorm, maxResults: 50, singleEvents: true })),

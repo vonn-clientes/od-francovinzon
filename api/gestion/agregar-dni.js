@@ -9,6 +9,7 @@ import { formatearDniConPuntos } from '../../lib/dni.js';
 import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { guardarContacto } from '../../lib/actualizarContactoSupabase.js';
+import { agendaPrimariaActiva, leerAgendaRpc, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -27,6 +28,16 @@ export default async function handler(req, res) {
   const valorGuardar = formatearDniConPuntos(crudo) || '-';
 
   try {
+    if (agendaPrimariaActiva()) {
+      const rows = await leerAgendaRpc('consultorio_agenda_por_id', { p_id: eventId });
+      const turno = Array.isArray(rows) ? rows[0] : rows?.turno || rows;
+      if (!turno) return res.status(404).json({ success: false, message: 'No se encontró el turno.' });
+      const nueva = actualizarLinea(turno.description_original || '', /DNI:\s*[^\n]*/i, `DNI: ${valorGuardar}`, valorGuardar !== '-');
+      if (nueva === null) return res.status(200).json({ success: true, message: 'Sin cambios.', dni: '' });
+      const r = await escribirAgendaRpc('consultorio_agenda_actualizar_contacto', { id: turno.id, dni: crudo, description_original: nueva });
+      if (!r?.ok) throw new Error('No se pudo confirmar la actualización del DNI.');
+      return res.status(200).json({ success: true, message: crudo ? 'DNI actualizado.' : 'DNI borrado.', dni: valorGuardar === '-' ? '' : valorGuardar });
+    }
     const calendar = getCalendarClient();
     const { data: ev } = await calendar.events.get({ calendarId, eventId });
 
@@ -68,4 +79,11 @@ export default async function handler(req, res) {
     await avisarFallo({ endpoint: 'api/gestion/agregar-dni.js', error: err });
     res.status(500).json({ success: false, message: 'No se pudo guardar el DNI.' });
   }
+}
+
+function actualizarLinea(texto, regex, linea, agregar) {
+  if (regex.test(texto)) return texto.replace(regex, linea);
+  if (!agregar) return null;
+  const limpia = texto.trimEnd();
+  return limpia ? `${limpia}\n${linea}` : linea;
 }

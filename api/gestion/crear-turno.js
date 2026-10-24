@@ -14,6 +14,7 @@ import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 // el turno nuevo queda confirmado. Best-effort, nunca bloquea el alta.
 import { confirmarTurnoPuntualSiMovimiento } from '../../lib/confirmarTurnosPorMovimiento.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
+import { agendaPrimariaActiva, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -45,6 +46,20 @@ export default async function handler(req, res) {
 
     const start = toArgDate(date, time);
     const end = new Date(start.getTime() + duration * 60000);
+
+    if (agendaPrimariaActiva()) {
+      const title = `${aTituloCase(nombre)} ${aTituloCase(apellido) || ''}`.trim();
+      const codigoCorto = generarCodigoCorto();
+      const description = `Teléfono: ${telNormalizado || '-'}\n${telNormalizado ? 'Teléfono verificado: Sí\n' : ''}DNI: ${formatearDniConPuntos(dni) || '-'}\nEmail: ${email || '-'}\nMotivo: ${motivo || '-'}\nPaciente nuevo: ${esNuevo ? 'Sí' : 'No'}\nCódigo corto: ${codigoCorto}\nCargado manualmente desde el panel de gestión.`;
+      const r = await escribirAgendaRpc('consultorio_agenda_crear_turno', { inicio: start.toISOString(), fin: end.toISOString(), tipo: sobreturno ? 'sobreturno' : 'turno', paciente_nombre: title,
+        dni: String(dni || '').replace(/\D/g, ''), telefono: telNormalizado, email: email || '', motivo: motivo || '', paciente_nuevo: !!esNuevo, telefono_verificado: !!telNormalizado,
+        confirmado: false, confirmacion_solicitada: false, codigo_corto: codigoCorto, ubicacion: 'Ameghino 410, E3260 Concepción del Uruguay, Entre Ríos, Argentina',
+        description_original: description, calendar_id: calendarId });
+      if (!r.ok) return res.status(200).json({ success: false, message: 'Ese horario ya está ocupado en ese calendario.' });
+      await logActividad({ tipo: sobreturno ? 'sobreturno_creado' : 'turno_creado', detalle: `${title} — ${date} ${time}`, actor: 'gestión (Ayelen)' });
+      if (!r.repetido) await espejarNuevo(r.id, { title, description, start, end, calendarId });
+      return res.status(200).json({ success: true, message: `${sobreturno ? 'Sobreturno' : 'Turno'} cargado para el ${date} a las ${time} hs.`, eventId: r.id, calendarId, codigoCorto });
+    }
 
     const calendar = getCalendarClient();
     const title = `${aTituloCase(nombre)} ${aTituloCase(apellido) || ''}`.trim();
@@ -143,4 +158,17 @@ export default async function handler(req, res) {
     await avisarFallo({ endpoint: 'api/gestion/crear-turno.js', detalle: sobreturno ? 'sobreturno' : 'turno', error: err });
     res.status(500).json({ success: false, message: 'Error al cargar el turno.' });
   }
+}
+
+async function espejarNuevo(id, t) {
+  if (process.env.AGENDA_ESPEJAR_CALENDAR === '0') return;
+  try {
+    const cal = getCalendarClient();
+    const requestBody = { id: String(id).replace(/-/g, ''), summary: t.title, description: t.description,
+      location: 'Ameghino 410, E3260 Concepción del Uruguay, Entre Ríos, Argentina', start: { dateTime: t.start.toISOString(), timeZone: TIME_ZONE }, end: { dateTime: t.end.toISOString(), timeZone: TIME_ZONE } };
+    let data;
+    try { ({ data } = await cal.events.insert({ calendarId: t.calendarId, requestBody })); }
+    catch (e) { if (e?.code !== 409 && e?.response?.status !== 409) throw e; ({ data } = await cal.events.get({ calendarId: t.calendarId, eventId: requestBody.id })); }
+    await escribirAgendaRpc('consultorio_agenda_guardar_calendar_id', { id, calendar_event_id: data.id });
+  } catch (e) { console.error('No se pudo espejar turno en Calendar:', e?.message || e); }
 }

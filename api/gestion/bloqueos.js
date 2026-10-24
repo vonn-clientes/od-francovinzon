@@ -3,6 +3,7 @@ import {
 } from '../../lib/googleCalendar.js';
 import { avisarFallo } from '../../lib/alertas.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
+import { agendaPrimariaActiva, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
 
 function nextDayStr(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -25,6 +26,32 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (agendaPrimariaActiva()) {
+      if (modo === 'horario') {
+        const start = toArgDate(date, horaInicio), end = toArgDate(date, horaFin);
+        if (!(end > start)) return res.status(200).json({ success: false, message: 'La hora de fin tiene que ser posterior a la de inicio.' });
+        const r = await escribirAgendaRpc('consultorio_agenda_crear_bloqueo', { inicio: start.toISOString(), fin: end.toISOString(), dia_completo: false, clase: 'bloqueo', motivo: motivo || '', calendar_id: 'odontologofrancovinzon@gmail.com' });
+        if (!r.ok) return res.status(200).json({ success: false, message: 'No se pudo bloquear ese horario.' });
+        await espejarBloqueo(r.id, { date, horaInicio, horaFin, motivo, day: false });
+        return res.status(200).json({ success: true, message: `Bloqueado de ${horaInicio} a ${horaFin} el ${date}.` });
+      }
+      if (accion === 'desbloquear' || accion === 'desmarcar-feriado-atendido') {
+        const clase = accion === 'desbloquear' ? 'bloqueo' : 'feriado_atendido';
+        const r = await escribirAgendaRpc('consultorio_agenda_borrar_bloqueo', { fecha: date, clase });
+        if (!r.ok) return res.status(200).json({ success: false, message: accion === 'desbloquear' ? 'Ese día no está bloqueado.' : 'Ese feriado no está marcado como atendido.' });
+        await borrarEspejos(r.eventos || []);
+        return res.status(200).json({ success: true, message: accion === 'desbloquear' ? `Día ${date} desbloqueado.` : `Feriado del ${date} desmarcado.` });
+      }
+      if (accion === 'marcar-feriado-atendido') {
+        const r = await escribirAgendaRpc('consultorio_agenda_crear_bloqueo', { inicio: toArgDate(date, '00:00').toISOString(), fin: toArgDate(nextDayStr(date), '00:00').toISOString(), dia_completo: true, clase: 'feriado_atendido', motivo: 'FERIADO_ATENDIDO', calendar_id: 'odontologofrancovinzon@gmail.com' });
+        if (r.ok) await espejarBloqueo(r.id, { date, motivo: 'FERIADO_ATENDIDO', day: true, feriado: true });
+        return res.status(200).json(r.ok ? { success: true, message: `Feriado del ${date} marcado como atendido.` } : { success: false, message: 'No se pudo marcar el feriado.' });
+      }
+      const r = await escribirAgendaRpc('consultorio_agenda_crear_bloqueo', { inicio: toArgDate(date, '00:00').toISOString(), fin: toArgDate(nextDayStr(date), '00:00').toISOString(), dia_completo: true, clase: 'bloqueo', motivo: motivo || '', calendar_id: 'odontologofrancovinzon@gmail.com' });
+      if (!r.ok) return res.status(200).json({ success: false, message: 'No se pudo bloquear el día.' });
+      await espejarBloqueo(r.id, { date, motivo, day: true });
+      return res.status(200).json({ success: true, message: `Día ${date} bloqueado.` });
+    }
     const calendar = getCalendarClient();
 
     if (modo === 'horario') return await bloquearHorario(calendar, req, res);
@@ -132,6 +159,24 @@ export default async function handler(req, res) {
     await avisarFallo({ endpoint: 'api/gestion/bloqueos.js', detalle: modo === 'horario' ? 'horario' : accion, error: err });
     res.status(500).json({ success: false, message: 'Error al procesar el bloqueo.' });
   }
+}
+
+async function espejarBloqueo(id, b) {
+  if (!id || process.env.AGENDA_ESPEJAR_CALENDAR === '0') return;
+  try {
+    const cal = getCalendarClient();
+    const requestBody = { summary: b.feriado ? 'Feriado atendido' : b.motivo ? `No atiende - ${b.motivo}` : 'No atiende', description: b.feriado ? FERIADO_ATENDIDO_MARKER : BLOCK_MARKER };
+    if (b.day) { requestBody.start = { date: b.date }; requestBody.end = { date: nextDayStr(b.date) }; }
+    else { const start = toArgDate(b.date, b.horaInicio), end = toArgDate(b.date, b.horaFin); requestBody.start = { dateTime: start.toISOString(), timeZone: TIME_ZONE }; requestBody.end = { dateTime: end.toISOString(), timeZone: TIME_ZONE }; }
+    const { data } = await cal.events.insert({ calendarId: CALENDAR_ID, requestBody });
+    await escribirAgendaRpc('consultorio_agenda_guardar_bloqueo_calendar_id', { id, calendar_event_id: data.id });
+  } catch (e) { console.error('No se pudo espejar bloqueo en Calendar:', e?.message || e); }
+}
+
+async function borrarEspejos(eventos) {
+  if (process.env.AGENDA_ESPEJAR_CALENDAR === '0' || !eventos.length) return;
+  try { const cal = getCalendarClient(); await Promise.all(eventos.filter((e) => e.calendar_event_id).map((e) => cal.events.delete({ calendarId: e.calendar_id, eventId: e.calendar_event_id }))); }
+  catch (e) { console.error('No se pudieron borrar espejos de bloqueos:', e?.message || e); }
 }
 
 async function bloquearHorario(calendar, req, res) {

@@ -7,6 +7,7 @@ import { avisarFallo } from '../../lib/alertas.js';
 import { conReintentos } from '../../lib/retry.js';
 import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
 import { normalizarDni, normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
+import { eventosAgenda } from '../../lib/agendaSupabase.js';
 
 export default async function handler(req, res) {
   if (!isValidGestionKey(req.query.key)) {
@@ -19,6 +20,23 @@ export default async function handler(req, res) {
     // `dias` (opcional, 1-31): para /datosqr, que lista los próximos turnos de varios días.
     const dias = Math.min(31, Math.max(1, parseInt(req.query.dias || '1', 10) || 1));
     const dayEnd = new Date(dayStart.getTime() + dias * 24 * 60 * 60000);
+
+    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') {
+      const supa = await eventosAgenda(dayStart.toISOString(), dayEnd.toISOString());
+      if (supa !== null) {
+        const items = supa.filter((ev) => ev.__tipo !== 'feriado_atendido').map((ev) => {
+          const { start, end } = eventBounds(ev);
+          const bloqueo = ev.__tipo === 'bloqueo';
+          return { id: ev.id, calendarId: ev.calendarId || '', start: start.toISOString(), end: end.toISOString(),
+            title: ev.summary || '', description: ev.description || '', tipo: bloqueo ? 'bloqueo' : ev.__tipo,
+            allDay: false, telefono: extraerTelefono(ev.description), dni: extraerDni(ev.description),
+            codigoCorto: extraerCodigoCorto(ev.description), esNuevoPaciente: extraerEsNuevoPaciente(ev.description),
+            telefonoVerificado: extraerTelefonoVerificado(ev.description), confirmado: extraerConfirmado(ev.description) };
+        });
+        items.sort((a, b) => new Date(a.start) - new Date(b.start));
+        return res.status(200).json(items);
+      }
+    }
 
     const calendar = getCalendarClient();
 

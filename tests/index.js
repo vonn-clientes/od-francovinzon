@@ -8,3 +8,4 @@ import './espejoTurnosBestEffort.test.js';
 import './lecturasSupabase.test.js';
 import './adminSupabase.test.js';
 import './escrituraPrimaria.test.js';
+import './fichaDesdeSupabase.test.js';

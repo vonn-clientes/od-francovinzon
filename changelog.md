@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-24 — Tramo 1: lecturas desde Supabase (con la bandera encendida)
+- `lib/fichaDesdeSupabase.js`: lee la ficha (y sus movimientos) desde Supabase. Lo usan la confirmación de turnos por movimiento, los PDF de ficha y estado de cuenta, y el monitoreo (que cuenta fichas/movimientos en Supabase en vez de listar Drive). Sin ficha en Supabase o con la bandera apagada, sigue el camino Google.
+
 ## 2026-10-24 — Etapa A: las fichas se guardan en Supabase (bandera apagada)
 - Con `SUPABASE_WRITES_PRIMARY=1`, las 9 acciones de ficha de `api/gestion/pacientes.js` (campo, movimientos, prestaciones) se aplican con `fichaMotor` y se guardan en Supabase con control de versión; ya no se escribe en Sheets. Conflicto/timeout dudoso -> 503 sin tocar Google; ficha sin snapshot -> camino Google de siempre. Apagada = comportamiento idéntico al anterior.
 - Lectura: con la bandera, `ficha_version > 0` es autoritativa (no se compara con Drive).

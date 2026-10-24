@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-24 — Tramo 2: buscadores y listados desde Supabase (con la bandera encendida)
+- RPC nuevas `consultorio_buscar_pacientes` y `consultorio_listar_pacientes`; `lib/busquedaSupabase.js`. Autocompletado de pacientes (`buscar.js`), `listar`, `buscarPublico` y `hoyPublico` (cruce de turnos por nombre o DNI) leen de `consultorio.pacientes` y caen a Drive/consolidado solo si Supabase no devuelve nada. El listado completo de /gestion sigue en el consolidado (asistencia y email aún no están en Supabase).
+- Monitoreo por RPC `consultorio_monitoreo` (el schema `consultorio` no se consulta por REST directo).
+
 ## 2026-10-24 — Tramo 1: lecturas desde Supabase (con la bandera encendida)
 - `lib/fichaDesdeSupabase.js`: lee la ficha (y sus movimientos) desde Supabase. Lo usan la confirmación de turnos por movimiento, los PDF de ficha y estado de cuenta, y el monitoreo (que cuenta fichas/movimientos en Supabase en vez de listar Drive). Sin ficha en Supabase o con la bandera apagada, sigue el camino Google.
 

@@ -8,6 +8,7 @@ import { normalizarDni, normalizarTelefonoMapeo, rangoPrestacionesObraSocial, PA
 import { getPacientesSheetsClient, getPacientesDriveClient } from '../../lib/googleOAuthPacientes.js';
 import { esFeriado } from '../../lib/feriados.js';
 import { conReintentos } from '../../lib/retry.js';
+import { buscarPacientesSupabase, listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
 
 const MESES_RANGO = 6;
 const TTL_DNI_FICHA_TAREAS = 2 * 60 * 1000;
@@ -146,7 +147,9 @@ async function buscarTelefono(req, res) {
     const nombre = (req.query.nombre || '').trim();
     if (nombre.length < 2) return res.status(200).json({ telefono: null, dni: null });
 
-    const match = await buscarPacienteConsolidadoPorNombre(nombre, { cache: true });
+    const supabase = await buscarPacientesSupabase(nombre, { limite: 20 });
+    const match = supabase?.find((p) => normalizarTexto(`${p.nombre} ${p.apellido}`) === normalizarTexto(nombre))
+      || await buscarPacienteConsolidadoPorNombre(nombre, { cache: true });
     if (!match) return res.status(200).json({ telefono: null, dni: null });
 
     // Nunca "verificado" acá (esa marca es específica de intl-tel-input en /gestion/
@@ -167,6 +170,9 @@ async function buscarPacientes(req, res) {
   try {
     const q = (req.query.q || '').trim();
     if (q.length < 3) return res.status(200).json([]);
+
+    const supabase = await buscarPacientesSupabase(q, { limite: PACIENTES_LIMITE });
+    if (supabase?.length) return res.status(200).json(supabase.map((p) => ({ nombre: `${p.nombre} ${p.apellido}`.trim(), telefono: p.telefono || '', telefonoVerificado: false, dni: p.dni || '' })));
 
     const now = new Date();
     const timeMin = new Date(now);
@@ -549,6 +555,12 @@ async function proximoBloqueo(req, res) {
 async function pacientesCentral(req, res) {
   try {
     const q = String(req.query.q || '').trim().toLowerCase();
+    // El listado completo (sin búsqueda) sigue leyendo el consolidado: trae asistencia y email que Supabase aún no tiene.
+    const supabase = q ? await buscarPacientesSupabase(q, { limite: 500 }) : null;
+    if (supabase?.length) {
+      return res.status(200).json(supabase.map((f) => ({ nombre: f.nombre, apellido: f.apellido, dni: f.dni, telefono: f.telefono,
+        email: '', conFicha: !!f.id, fichaId: f.id || '', origen: 'supabase', actualizado: '', turnosPasados: 0, turnosAsistidos: 0, visitas: 0, ultimaVisita: '', calcActualizado: '' })));
+    }
     let filas = await listarPacientesConsolidados({ cache: true });
     if (q) {
       const qNorm = normalizarTexto(q);
@@ -626,7 +638,13 @@ async function perfilPaciente(req, res) {
   try {
     const dni = String(req.query.dni || '').trim();
     const telefono = String(req.query.telefono || '').trim();
-    const paciente = dni ? await buscarPacienteConsolidadoPorDni(dni, { cache: true }) : (telefono ? await buscarPacienteConsolidadoPorTelefono(telefono, { cache: true }) : null);
+    const coincidencias = dni || telefono ? await buscarPacientesSupabase(dni || telefono, { limite: 20 }) : null;
+    const pacienteSupabase = coincidencias?.find((p) => dni
+      ? normalizarDni(p.dni) === normalizarDni(dni)
+      : String(p.telefono || '').replace(/\D/g, '').slice(-10) === telefono.replace(/\D/g, '').slice(-10));
+    const paciente = (pacienteSupabase && { nombre: pacienteSupabase.nombre, apellido: pacienteSupabase.apellido, dni: pacienteSupabase.dni,
+      telefono: pacienteSupabase.telefono, fichaId: pacienteSupabase.id, origen: 'supabase', ficha_json: pacienteSupabase.ficha_json })
+      || (dni ? await buscarPacienteConsolidadoPorDni(dni, { cache: true }) : (telefono ? await buscarPacienteConsolidadoPorTelefono(telefono, { cache: true }) : null));
     if (!paciente) {
       return res.status(200).json({ encontrado: false });
     }
@@ -673,7 +691,10 @@ async function perfilPaciente(req, res) {
     // ficha, se devuelven las últimas 8 con su estado — el perfil central las muestra sin
     // salir de /gestion (Fase 3 completa).
     let prestaciones = [];
-    if (paciente.fichaId) {
+    if (paciente.ficha_json && Array.isArray(paciente.ficha_json.prestacionesObraSocial)) {
+      prestaciones = paciente.ficha_json.prestacionesObraSocial.slice(-8).reverse();
+    }
+    if (paciente.fichaId && !paciente.ficha_json) {
       try {
         const sheets = getPacientesSheetsClient();
         const { data: pres } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: paciente.fichaId, range: rangoPrestacionesObraSocial() }));

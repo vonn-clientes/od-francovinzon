@@ -33,3 +33,13 @@ test('admite fila de handler y normaliza DNI como el handler real', () => {
 });
 
 test('compara saldo por movimiento', () => { const antes=base(); const despues={...base(),movimientos:[{fecha:'22/10/2026',tratamiento:'',debe:'$1,00',haber:'$0,00',saldo:'$9,00'}]}; const r=compararSombra({antes,despues,accion:'movimiento-agregar',body:{fecha:'22/10/2026',debe:'1',haber:'0'},ahora}); assert.equal(r.igual,false); assert.ok(r.diffs.some(d=>d.ruta==='movimientos[0]' && d.esperado.saldo==='$1,00')); });
+
+test('ignora anulado:false y ceros a la izquierda del código (diferencias de Google, no del motor)', () => {
+  const antes=base(); antes.prestacionesObraSocial=[{id:'p',fecha:'23/10/2026',tratamiento:'CONSULTA',codigo:'7',autorizado:true}];
+  const despues={...antes,prestacionesObraSocial:[{id:'g',fecha:'23/10/2026',tratamiento:'CONSULTA',codigo:'101',autorizado:true}]};
+  const r=compararSombra({antes,despues,accion:'prestacion-editar',body:{idRegistro:'p',fecha:'23/10/2026',tratamiento:'consulta',codigo:'0101',autorizado:true},ahora});
+  assert.equal(r.igual,true);
+  const a2=base(); a2.movimientos=[{id:'m',fecha:'23/10/2026',tratamiento:'Control',debe:'$0,00',haber:'$0,00',saldo:'$0,00'}];
+  const d2={...a2,movimientos:[{id:'g',fecha:'23/10/2026',tratamiento:'Control',debe:'$0,00',haber:'$0,00',saldo:'$0,00',anulado:false}]};
+  assert.equal(compararSombra({antes:a2,despues:d2,accion:'movimiento-editar',body:{idRegistro:'m',fecha:'23/10/2026',tratamiento:'control',debe:0,haber:0},ahora}).igual,true);
+});

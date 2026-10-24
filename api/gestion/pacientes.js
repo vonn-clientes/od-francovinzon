@@ -1604,7 +1604,9 @@ async function anularMovimientoEnSheet(sheets, id, fila) {
   }));
   const [fecha = '', tratamiento = '', debe = 0, haber = 0] = (data.values && data.values[0]) || [];
   if (/^\[ANULADO\]/.test(tratamiento)) return false; // ya estaba anulado, no hace nada
-  const nuevoTexto = `[ANULADO] ${tratamiento} (era: Debe $${debe || 0} / Haber $${haber || 0})`;
+  // Google devuelve los montos ya con "$" (ej. "$45.677,83"): no duplicar el signo.
+  const conSigno = (v) => { const t = String(v ?? '').trim(); return !t || t === '0' ? '$0,00' : t.startsWith('$') ? t : `$${t}`; };
+  const nuevoTexto = `[ANULADO] ${tratamiento} (era: Debe ${conSigno(debe)} / Haber ${conSigno(haber)})`;
   await conReintentos(() => sheets.spreadsheets.values.update({
     spreadsheetId: id,
     range: `${SHEET_NAME}!B${fila}:E${fila}`,

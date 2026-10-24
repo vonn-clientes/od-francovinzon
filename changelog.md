@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-24 — Tramo 4: exportes y métricas de /admin desde Supabase (con SUPABASE_READS=1)
+- RPC `consultorio_admin_pacientes_fichas` (id = ficha_sheet_id). `lib/adminSupabase.js` adapta `ficha_json` para exportes CSV/completo, métricas, deuda y perfil; si la RPC falla o viene vacía, sigue el camino Google. La asistencia sigue usando Calendar hasta completar el backfill de `consultorio.turnos` (`atribuirTurnosPasadosSupabase` queda lista, sin usar). El consolidado (email/asistencia) sigue en Google: no existe aún tabla en Supabase.
+
 ## 2026-10-24 — Tramo 3: crear paciente y contacto en Supabase (con la bandera encendida)
 - RPC `consultorio_crear_ficha`; `lib/crearFichaSupabase.js` crea la ficha (id `sb-<uuid>`, nunca va a Drive/Sheets) y `lib/actualizarContactoSupabase.js` guarda teléfono/DNI. `agregar-telefono.js`, `agregar-dni.js` y el alta de `pacientes.js` escriben en Supabase; fusionar fichas `sb-` se rechaza por ahora. Bandera apagada = igual que antes.
 

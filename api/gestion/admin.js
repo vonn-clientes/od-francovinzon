@@ -725,7 +725,7 @@ async function escanearFichasAdmin(forzar = false) {
     // Rápido: las fichas ya están copiadas en Supabase (se actualizan en cada edición y
     // todas las noches). Si falla o viene vacío, se cae al camino viejo (leer Google).
     if (debeUsarSupabaseAdmin()) {
-      try { return await escanearFichasDesdeSupabase(); }
+      try { const resultado = await escanearFichasDesdeSupabase(); if (resultado?.fichas?.length) return resultado; }
       catch (err) { console.warn('[admin.js] escaneo desde Supabase falló, uso Google:', err?.message || err); }
     }
     const drive = getPacientesDriveClient();
@@ -1457,6 +1457,16 @@ async function getMetricasAvanzadas(req, res) {
 // ---------- 5. Exportaciones ----------
 
 async function exportPacientesCsv(req, res) {
+  if (debeUsarSupabaseAdmin()) {
+    const sb = await rpcAdmin('consultorio_admin_pacientes_fichas', {});
+    if (Array.isArray(sb) && sb.length) {
+      const filas = sb.map((r) => { const c = r.ficha_json?.campos || {}; return [c.nombre || r.nombre || '', c.apellido || r.apellido || '', c.dni || r.dni || '']; })
+        .sort((a, b) => `${a[0]} ${a[1]}`.localeCompare(`${b[0]} ${b[1]}`, 'es'));
+      const csv = ['Nombre,Apellido,DNI', ...filas.map((f) => f.map(csvEscape).join(','))].join('\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename=\"pacientes.csv\"');
+      return res.status(200).send('﻿' + csv);
+    }
+  }
   const drive = getPacientesDriveClient();
   const { data } = await conReintentos(() => drive.files.list({
     q: `'${PACIENTES_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
@@ -1739,6 +1749,17 @@ async function exportPerfilPacientes(req, res) {
 // ni escribe nada en las fichas. Lotes de 25 como el resto de los escaneos de fichas.
 async function exportPacientesCompleto(req, res) {
   const formato = req.query.formato === 'md' ? 'md' : 'xlsx';
+  if (debeUsarSupabaseAdmin()) {
+    const rows = await rpcAdmin('consultorio_admin_pacientes_fichas', {});
+    if (Array.isArray(rows) && rows.length) {
+      const fichas = rows.map((r) => { const f = r.ficha_json || {}; return { id: r.id || r.ficha_sheet_id || '', campos: f.campos || {}, financiero: f.financiero || {}, movimientos: f.movimientos || [], prestaciones: f.prestacionesObraSocial || [] }; });
+      const consolidados = await listarPacientesConsolidados({ cache: true }).catch(() => []);
+      const hojas = armarHojas({ fichas, consolidados });
+      const hoyStr = formatArgDay(new Date()); res.setHeader('Cache-Control', 'no-store');
+      if (formato === 'md') { res.setHeader('Content-Type', 'text/markdown; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename=\"pacientes_${hoyStr}.md\"`); return res.status(200).send(crearMarkdown(hojas, { generado: hoyStr })); }
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', `attachment; filename=\"pacientes_${hoyStr}.xlsx\"`); return res.status(200).send(Buffer.from(crearXlsx(hojas)));
+    }
+  }
   const drive = getPacientesDriveClient();
   const sheets = getPacientesSheetsClient();
 

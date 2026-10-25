@@ -6,16 +6,17 @@ import {
 import { avisarFallo } from '../../lib/alertas.js';
 import { conReintentos } from '../../lib/retry.js';
 import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
+import { mismaPersonaEstricta } from '../../lib/identidadTurno.js';
 import { normalizarDni } from '../../lib/pacientesSheet.js';
 import { eventosAgenda } from '../../lib/agendaSupabase.js';
 
 // Ficha confirmada (para el botón QR "Mis datos" y para no mostrar "Crear ficha"): SOLO si el
-// DNI coincide EXACTO con una persona del registro consolidado que ya tiene ficha. El teléfono
-// NO se usa (los chicos usan el de sus padres). Sin DNI o con duda no se marca nada: esos casos
-// los asigna Fausto a mano en /admin.
+// DNI coincide EXACTO con una persona del registro consolidado que ya tiene ficha (o, sin DNI, nombre
+// completo exacto + teléfono: lib/identidadTurno.js). El teléfono solo NUNCA alcanza (los chicos usan el
+// de sus padres). Con duda no se marca nada: esos casos los asigna Fausto a mano en /admin.
 async function asignarFichaId(items) {
   try {
-    const candidatos = items.filter((it) => it.dni && it.tipo !== 'bloqueo');
+    const candidatos = items.filter((it) => (it.dni || it.telefono) && it.tipo !== 'bloqueo');
     if (!candidatos.length) return;
     const filas = await listarPacientesConsolidados({ cache: true });
     // Mapas valor -> fichaId; null si el valor está en más de una ficha (ambiguo).
@@ -30,8 +31,15 @@ async function asignarFichaId(items) {
     };
     const porDni = mapa((f) => f.dni && normalizarDni(f.dni));
     for (const it of candidatos) {
-      const fichaId = porDni.get(normalizarDni(it.dni));
-      if (fichaId) it.fichaId = fichaId;
+      if (it.dni) {
+        const fichaId = porDni.get(normalizarDni(it.dni));
+        if (fichaId) it.fichaId = fichaId;
+        continue;
+      }
+      // Turno sin DNI: solo nombre completo exacto + mismo teléfono (lib/identidadTurno.js), p. ej.
+      // una persona que se asignó a mano en /admin. Si da más de una ficha, es duda: no se asigna.
+      const ids = new Set(filas.filter((f) => f.fichaId && mismaPersonaEstricta({ nombre: it.title, telefono: it.telefono }, { nombre: f.nombre, apellido: f.apellido, telefono: f.telefono, dni: '' })).map((f) => f.fichaId));
+      if (ids.size === 1) it.fichaId = [...ids][0];
     }
   } catch { /* sin fichaId: no se muestra el botón QR */ }
 }

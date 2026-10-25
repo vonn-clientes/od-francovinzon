@@ -751,3 +751,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-25 — Localidad: "C Del U" y variantes pasan a "Concepción del Uruguay"
 - `lib/fichaMotor.js`: `localidadCanonica()` se aplica en `actualizar-campo` de `localidad` (cubre /pacientes, crear ficha y autoficha). Test: `tests/localidadCanonica.test.js`. Las fichas existentes se corrigieron aparte con un UPDATE en Supabase (ver abajo en este mismo día).
+
+## 2026-10-25 — Localidad: todas las del desplegable se escriben bien
+- `localidadCanonica()` ahora mapea toda localidad a la forma de `assets/combo-localidad.js` (ignora tilde/mayúsculas/"Entre Ríos"; "Gchu" → Gualeguaychú). Fichas existentes corregidas con UPDATE en Supabase (Gchu 8, San Jose/San José, Urdinarrain Entre Rios). Tests 126/126.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 // Regresión 2026-10-25: con SUPABASE_AGENDA_PRIMARY la agenda devolvía los turnos sin
 // `fichaId` y /gestion mostraba "Crear ficha" en todos. Cubre DNI en descripción, DNI solo
-// en la columna, teléfono sin DNI y ambigüedad.
+// en la columna, teléfono (no asigna) y ambigüedad.
 test('turnos-dia asigna fichaId a turnos de pacientes con ficha (agenda en Supabase)', async () => {
   Object.assign(process.env, { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_KEY: 'k', SUPABASE_READS: '1',
     SUPABASE_WRITES_PRIMARY: '1', SUPABASE_AGENDA_PRIMARY: '1', GESTION_KEY: 'gk' });
@@ -31,7 +31,7 @@ test('turnos-dia asigna fichaId a turnos de pacientes con ficha (agenda en Supab
   const porId = Object.fromEntries(res.body.map((x) => [x.id, x.fichaId]));
   assert.equal(porId.a, 'F1');
   assert.equal(porId.b, 'F2');
-  assert.equal(porId.c, 'F3');
+  assert.equal(porId.c, undefined, 'el teléfono nunca asigna ficha (hijos con teléfono del padre)');
   assert.equal(porId.d, undefined, 'DNI en dos fichas = ambiguo, no se asigna');
   assert.equal(porId.e, undefined);
 });

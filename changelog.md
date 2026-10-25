@@ -742,3 +742,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-25 — Fix: turnos sin `fichaId` en /gestion con la agenda en Supabase
 - `api/gestion/turnos-dia.js`: la rama `SUPABASE_AGENDA_PRIMARY` devolvía la lista antes de asignar `fichaId`, por eso /gestion mostraba "Crear ficha" en todos los turnos. La asignación (DNI exacto, o teléfono si no hay DNI; ambiguo = no asigna) pasó a `asignarFichaId()` y se usa en ambas ramas, para cualquier fecha (pasada, actual o futura). `lib/agendaSupabase.js` expone `__dni`/`__telefono` de las columnas como respaldo si la descripción no los trae. Test: `tests/turnosDiaFichaId.test.js`. Tests 122/122.
+
+## 2026-10-25 — `fichaId` de turnos: solo por DNI exacto (sin teléfono)
+- `api/gestion/turnos-dia.js`: se quitó el cruce por teléfono (los chicos usan el teléfono de los padres). Solo DNI exacto y no ambiguo; el resto (sin DNI, nombre parecido, duda) lo asigna Fausto en `/admin` → sin ficha.

@@ -6,15 +6,16 @@ import {
 import { avisarFallo } from '../../lib/alertas.js';
 import { conReintentos } from '../../lib/retry.js';
 import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js';
-import { normalizarDni, normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
+import { normalizarDni } from '../../lib/pacientesSheet.js';
 import { eventosAgenda } from '../../lib/agendaSupabase.js';
 
-// Ficha confirmada (para el botón QR "Mis datos" y para no mostrar "Crear ficha"): solo si el
-// DNI (o el teléfono, si el turno no tiene DNI) coincide EXACTO con una persona del registro
-// consolidado que ya tiene ficha. Si algo falla o hay duda, no se marca nada.
+// Ficha confirmada (para el botón QR "Mis datos" y para no mostrar "Crear ficha"): SOLO si el
+// DNI coincide EXACTO con una persona del registro consolidado que ya tiene ficha. El teléfono
+// NO se usa (los chicos usan el de sus padres). Sin DNI o con duda no se marca nada: esos casos
+// los asigna Fausto a mano en /admin.
 async function asignarFichaId(items) {
   try {
-    const candidatos = items.filter((it) => (it.dni || it.telefono) && it.tipo !== 'bloqueo');
+    const candidatos = items.filter((it) => it.dni && it.tipo !== 'bloqueo');
     if (!candidatos.length) return;
     const filas = await listarPacientesConsolidados({ cache: true });
     // Mapas valor -> fichaId; null si el valor está en más de una ficha (ambiguo).
@@ -28,9 +29,8 @@ async function asignarFichaId(items) {
       return m;
     };
     const porDni = mapa((f) => f.dni && normalizarDni(f.dni));
-    const porTel = mapa((f) => f.telefono && normalizarTelefonoMapeo(f.telefono));
     for (const it of candidatos) {
-      const fichaId = it.dni ? porDni.get(normalizarDni(it.dni)) : porTel.get(normalizarTelefonoMapeo(it.telefono));
+      const fichaId = porDni.get(normalizarDni(it.dni));
       if (fichaId) it.fichaId = fichaId;
     }
   } catch { /* sin fichaId: no se muestra el botón QR */ }

@@ -1743,7 +1743,7 @@
     // de abajo) no cambia un carácter.
     // {{link}}: link corto /c/CODIGO que confirma el turno apenas lo abre el paciente. Si el
     // turno no tiene código (turnos viejos), se saca la línea del link y se pide responder.
-    const linkConfirmar = it.codigoCorto ? `${location.origin}/c/${it.codigoCorto}` : '';
+    const linkConfirmar = it.codigoCorto ? `https://odfrancovinzon.vonn.com.ar/c/${it.codigoCorto}` : '';
     if (whatsappTemplateConfig) {
       let plantilla = whatsappTemplateConfig;
       if (!linkConfirmar) {

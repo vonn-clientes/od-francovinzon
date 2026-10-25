@@ -736,3 +736,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 ## 2026-10-24 — Tramos 10–11: handlers sin Google (PENDIENTE de merge hasta aplicar el SQL)
 - Contacto/DNI de turnos, bloqueos de horarios, buscar (tareas/feriados/perfil), pacientes (ficha/teléfono/hoy/cumpleaños/completar-teléfono) y admin (horarios/monitoreo/exports/sin-ficha) usan Supabase con los flags primarios; sin fallback a Google. `mapeos` devuelve `[]` y `metricas-avanzadas` 503 con AGENDA_PRIMARY (falta RPC).
 - SQL: `supabase/agenda_contacto_dni_bloqueo_id.sql` (aplicar ANTES de mergear). Harness dinámico (googleapis parcheado + fetch simulado): 0 llamadas a Google en 52 casos. Tests 121/121.
+
+## 2026-10-24 — Fix urgente: `getConfig` vuelve a leer de Google las claves aún no migradas
+- Tras el fix de `escrituraPrimariaActiva` (#85), `getConfig` devolvía el default si la clave no estaba en Supabase: `reservaOnlinePausada` (default = pausada) y `horarios` no estaban migradas → riesgo de reserva online pausada. Ahora, si falta la clave, se lee de Google (solo lectura) y se copia a Supabase. Cuando Supabase tenga las 5 claves (textos, listas, radios, horarios, reservaOnlinePausada), Google deja de usarse solo.

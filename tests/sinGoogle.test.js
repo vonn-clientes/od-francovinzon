@@ -37,7 +37,7 @@ test('las lecturas del Tramo 11 tienen rutas Supabase y cortan el fallback bajo 
   assert.match(pacientes, /if \(primaria\) return res\.status\(503\).*Supabase/s);
   assert.match(pacientes, /consultorio_agenda_actualizar_contacto/);
   assert.match(pacientes, /agendaPrimariaActiva\(\)/);
-  assert.match(pacientes, /if \(escrituraPrimariaActiva\(process\.env\)\) return res\.status\(200\)\.json\(\[\]\)/);
+  assert.match(pacientes, /leerMapeosSupabase\(\{ leerGoogle: leerMapeosDesdeGoogle \}\)/);
   assert.match(admin, /if \(agendaPrimariaActiva\(\)\) return res\.status\(503\).*Métricas avanzadas/s);
   assert.match(admin, /async function leerProximosTurnosPersonas[\s\S]*?eventosAgenda/);
   assert.match(admin, /async function exportTurnos[\s\S]*?eventosAgenda/);

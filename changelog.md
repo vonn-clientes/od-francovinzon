@@ -760,3 +760,7 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-25 — Métricas avanzadas de /admin con la agenda en Supabase
 - `getMetricasAvanzadas` (api/gestion/admin.js) ya no responde 503 con `SUPABASE_AGENDA_PRIMARY`: ocupación e inasistencia ya leían `turnosDesdeSupabase()`, solo faltaba no crear el cliente de Calendar. Verificado con el harness sin Google (ocupación, deuda, finanzas, público objetivo).
+
+## 2026-10-25 — Sellar la configuración en Supabase + interruptor `CONFIG_SOLO_SUPABASE`
+- `POST /api/gestion/admin` `recurso: 'sellar-config'` (ADMIN_KEY): copia desde Google las claves de config que existan (horarios, reservaOnlinePausada, textos, listas, radios) y guarda el valor por defecto de las que no existan, sin pisar las ya guardadas en Supabase.
+- `CONFIG_SOLO_SUPABASE=1` (variable de entorno, opcional): `getConfig` deja de consultar Google. Activar recién después de sellar. Test: `tests/sellarConfig.test.js`.

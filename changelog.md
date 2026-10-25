@@ -745,3 +745,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-25 — `fichaId` de turnos: solo por DNI exacto (sin teléfono)
 - `api/gestion/turnos-dia.js`: se quitó el cruce por teléfono (los chicos usan el teléfono de los padres). Solo DNI exacto y no ambiguo; el resto (sin DNI, nombre parecido, duda) lo asigna Fausto en `/admin` → sin ficha.
+
+## 2026-10-25 — Links/QR al paciente con el dominio de VONN
+- `api/gestion/pacientes.js`: `baseUrlPublica(req)` — el QR "Mis datos" (autoficha-token) y el link de receta usan siempre `https://odfrancovinzon.vonn.com.ar`; solo los previews de Vercel conservan su host. `gestion/index.html` (link de confirmación de turno) y `pacientes/index.html` (compartir) usan el dominio fijo en vez de `location.origin`. Antes la cámara mostraba `od-francovinzon.vercel.app`. `REDIRECT_URI` de OAuth no se toca (está registrado en Google).

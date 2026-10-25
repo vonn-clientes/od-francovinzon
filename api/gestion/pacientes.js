@@ -75,6 +75,16 @@ function claveValida(key) {
   return isValidGestionKey(key) || isValidAdminKey(key);
 }
 
+// Dominio público para links y QR que ve el paciente (el que muestra la cámara al escanear):
+// siempre el dominio propio de VONN. Solo los previews de Vercel conservan su host para poder
+// probarlos; el *.vercel.app de producción nunca se muestra.
+const DOMINIO_PUBLICO = 'https://odfrancovinzon.vonn.com.ar';
+function baseUrlPublica(req) {
+  const host = String(req?.headers?.host || '').toLowerCase();
+  if (/^od-francovinzon-[a-z0-9-]+\.vercel\.app$/.test(host) && host !== 'od-francovinzon.vercel.app') return `https://${host}`;
+  return DOMINIO_PUBLICO;
+}
+
 export default async function handler(req, res) {
   try {
     // Callback de Google (siempre GET, sin `modo`, con `code` y `state`) — no lleva
@@ -979,8 +989,7 @@ async function autofichaToken(req, res) {
     if (fichaId.startsWith('sb-')) {
       if (!await leerFichaSupabase(fichaId)) return res.status(404).json({ error: 'Ficha no encontrada.' });
       const token = firmarToken({ fichaId, secreto: secretoAutoficha(process.env.GESTION_KEY) });
-      const host = String(req.headers.host || '');
-      const base = /^od-francovinzon[a-z0-9-]*\.vercel\.app$/.test(host) ? `https://${host}` : 'https://od-francovinzon.vercel.app';
+      const base = baseUrlPublica(req);
       res.setHeader('Cache-Control', 'no-store, private');
       return res.status(200).json({ url: `${base}/mis-datos/?t=${token}` });
     }
@@ -988,8 +997,7 @@ async function autofichaToken(req, res) {
     const { data } = await conReintentos(() => drive.files.get({ fileId: fichaId, fields: 'id,parents,trashed' }));
     if (data.trashed || !(data.parents || []).includes(PACIENTES_FOLDER_ID)) return res.status(404).json({ error: 'Ficha no encontrada.' });
     const token = firmarToken({ fichaId, secreto: secretoAutoficha(process.env.GESTION_KEY) });
-    const host = String(req.headers.host || '');
-    const base = /^od-francovinzon[a-z0-9-]*\.vercel\.app$/.test(host) ? `https://${host}` : 'https://od-francovinzon.vercel.app';
+    const base = baseUrlPublica(req);
     res.setHeader('Cache-Control', 'no-store, private');
     return res.status(200).json({ url: `${base}/mis-datos/?t=${token}` });
   } catch (error) {
@@ -2581,7 +2589,7 @@ async function recibirRecetaShortcut(req, res) {
       await conReintentos(() => drive.files.create({ requestBody: { name: `${codigo}.json`, parents: [folderId] }, media: { mimeType: 'application/json', body: bufferToStream(Buffer.from(JSON.stringify(resultado))) }, fields: 'id' }));
     }
 
-    res.status(200).json({ success: true, url: `https://od-francovinzon.vercel.app/mobilephotouploaderodfrancovinzon/receta/?codigo=${codigo}` });
+    res.status(200).json({ success: true, url: `${baseUrlPublica(req)}/mobilephotouploaderodfrancovinzon/receta/?codigo=${codigo}` });
   } catch (err) {
     console.error(err);
     await avisarFallo({ endpoint: 'api/gestion/pacientes.js', detalle: 'receta-recibir-shortcut', error: err });

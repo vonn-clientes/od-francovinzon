@@ -748,3 +748,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-25 — Links/QR al paciente con el dominio de VONN
 - `api/gestion/pacientes.js`: `baseUrlPublica(req)` — el QR "Mis datos" (autoficha-token) y el link de receta usan siempre `https://odfrancovinzon.vonn.com.ar`; solo los previews de Vercel conservan su host. `gestion/index.html` (link de confirmación de turno) y `pacientes/index.html` (compartir) usan el dominio fijo en vez de `location.origin`. Antes la cámara mostraba `od-francovinzon.vercel.app`. `REDIRECT_URI` de OAuth no se toca (está registrado en Google).
+
+## 2026-10-25 — Localidad: "C Del U" y variantes pasan a "Concepción del Uruguay"
+- `lib/fichaMotor.js`: `localidadCanonica()` se aplica en `actualizar-campo` de `localidad` (cubre /pacientes, crear ficha y autoficha). Test: `tests/localidadCanonica.test.js`. Las fichas existentes se corrigieron aparte con un UPDATE en Supabase (ver abajo en este mismo día).

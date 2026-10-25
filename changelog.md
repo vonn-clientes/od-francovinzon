@@ -764,3 +764,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 ## 2026-10-25 — Sellar la configuración en Supabase + interruptor `CONFIG_SOLO_SUPABASE`
 - `POST /api/gestion/admin` `recurso: 'sellar-config'` (ADMIN_KEY): copia desde Google las claves de config que existan (horarios, reservaOnlinePausada, textos, listas, radios) y guarda el valor por defecto de las que no existan, sin pisar las ya guardadas en Supabase.
 - `CONFIG_SOLO_SUPABASE=1` (variable de entorno, opcional): `getConfig` deja de consultar Google. Activar recién después de sellar. Test: `tests/sellarConfig.test.js`.
+
+## 2026-10-25 — Botón "Pasar configuración" en /admin → Accesos
+- Llama a `sellar-config` (ver entrada anterior) sin necesidad de terminal.

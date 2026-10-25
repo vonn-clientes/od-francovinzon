@@ -451,6 +451,12 @@
           <button class="btn btn-danger" id="a-cambiar">Cambiar clave</button>
           <div class="msg" id="a-msg"></div>
         </div>
+        <div class="card">
+          <h2>Pasar la configuración a Supabase</h2>
+          <p class="hint">Copia horarios, reserva online, textos, listas y radios a Supabase (no pisa lo que ya está guardado). Es seguro repetirlo.</p>
+          <button class="btn btn-outline" id="a-sellar">Pasar configuración</button>
+          <div class="msg" id="a-sellar-msg"></div>
+        </div>
       </div>
 
       <!-- ---------- Actividad ---------- -->
@@ -1588,6 +1594,17 @@
       if (res.success) { toast('Clave actualizada'); document.getElementById('a-nueva-clave').value = ''; }
     } catch (e) {
       if (e.message !== 'unauthorized') setMsg('a-msg', 'Error de red.', 'error');
+    }
+  });
+
+  document.getElementById('a-sellar').addEventListener('click', async () => {
+    setMsg('a-sellar-msg', 'Pasando...', '');
+    try {
+      const res = await apiPost('sellar-config');
+      if (!res.success) { setMsg('a-sellar-msg', res.error || 'No se pudo.', 'error'); return; }
+      setMsg('a-sellar-msg', Object.entries(res.informe).map(([k, v]) => `${k}: ${v}`).join(' · '), 'ok');
+    } catch (e) {
+      if (e.message !== 'unauthorized') setMsg('a-sellar-msg', 'Error de red.', 'error');
     }
   });
 

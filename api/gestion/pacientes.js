@@ -7,6 +7,7 @@
 // lib/googleOAuthPacientes.js), no la cuenta de servicio — el porqué está documentado
 // ahí mismo. Calendar (autocompletar teléfono desde turnos) sigue usando la cuenta de
 // servicio de siempre (lib/googleCalendar.js), sin cambios.
+import { leerMapeosSupabase, guardarMapeoSupabase } from '../../lib/mapeosSupabase.js';
 import {
   getPacientesSheetsClient, getPacientesDriveClient, buildAuthUrl, exchangeCodeForTokens,
 } from '../../lib/googleOAuthPacientes.js';
@@ -1282,14 +1283,17 @@ async function guardarMapeo(sheets, mapeoId, { telefono, dni, decision }) {
   }
 }
 
-async function obtenerMapeos(req, res) {
-  // El modelo Supabase todavía no tiene una RPC/tabla pública equivalente para
-  // el mapeo teléfono↔ficha. En modo primario respondemos vacío, sin Sheets.
-  if (escrituraPrimariaActiva(process.env)) return res.status(200).json([]);
+async function leerMapeosDesdeGoogle() {
   const sheets = getPacientesSheetsClient();
   const drive = getPacientesDriveClient();
   const mapeoId = await getOrCreateMapeoSheetId(sheets, drive);
-  const mapeos = await leerMapeos(sheets, mapeoId);
+  return leerMapeos(sheets, mapeoId);
+}
+
+async function obtenerMapeos(req, res) {
+  // Con Supabase primario los mapeos viven en la configuración (se copian de Google una sola vez).
+  if (escrituraPrimariaActiva(process.env)) return res.status(200).json(await leerMapeosSupabase({ leerGoogle: leerMapeosDesdeGoogle }));
+  const mapeos = await leerMapeosDesdeGoogle();
   res.status(200).json(mapeos);
 }
 
@@ -1395,10 +1399,14 @@ async function confirmarMatch(req, res) {
 
     let mapeoGuardado = false;
     if (telNorm && dniNorm) {
-      const sheetsMapeo = getPacientesSheetsClient();
-      const driveMapeo = getPacientesDriveClient();
-      const mapeoId = await getOrCreateMapeoSheetId(sheetsMapeo, driveMapeo);
-      await guardarMapeo(sheetsMapeo, mapeoId, { telefono: telNorm, dni: dniNorm, decision });
+      if (escrituraPrimariaActiva(process.env)) {
+        await guardarMapeoSupabase({ telefono: telNorm, dni: dniNorm, decision }, { leerGoogle: leerMapeosDesdeGoogle });
+      } else {
+        const sheetsMapeo = getPacientesSheetsClient();
+        const driveMapeo = getPacientesDriveClient();
+        const mapeoId = await getOrCreateMapeoSheetId(sheetsMapeo, driveMapeo);
+        await guardarMapeo(sheetsMapeo, mapeoId, { telefono: telNorm, dni: dniNorm, decision });
+      }
       mapeoGuardado = true;
     }
 

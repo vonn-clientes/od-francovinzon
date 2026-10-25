@@ -754,3 +754,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-25 — Localidad: todas las del desplegable se escriben bien
 - `localidadCanonica()` ahora mapea toda localidad a la forma de `assets/combo-localidad.js` (ignora tilde/mayúsculas/"Entre Ríos"; "Gchu" → Gualeguaychú). Fichas existentes corregidas con UPDATE en Supabase (Gchu 8, San Jose/San José, Urdinarrain Entre Rios). Tests 126/126.
+
+## 2026-10-25 — Mapeo teléfono↔ficha ("¿Es este paciente?") en Supabase
+- Nuevo `lib/mapeosSupabase.js`: los mapeos viven en la configuración de Supabase (clave `mapeosTelefonoFicha`); la primera lectura copia la planilla de Google una sola vez (migración perezosa) y de ahí Google no se usa. `obtenerMapeos` y `confirmar-match` (api/gestion/pacientes.js) lo usan con WRITES_PRIMARY. Antes `mapeos` devolvía `[]` y las confirmaciones nuevas no se guardaban en Supabase. Test: `tests/mapeosSupabase.test.js`.

@@ -9,6 +9,33 @@ import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js'
 import { normalizarDni, normalizarTelefonoMapeo } from '../../lib/pacientesSheet.js';
 import { eventosAgenda } from '../../lib/agendaSupabase.js';
 
+// Ficha confirmada (para el botón QR "Mis datos" y para no mostrar "Crear ficha"): solo si el
+// DNI (o el teléfono, si el turno no tiene DNI) coincide EXACTO con una persona del registro
+// consolidado que ya tiene ficha. Si algo falla o hay duda, no se marca nada.
+async function asignarFichaId(items) {
+  try {
+    const candidatos = items.filter((it) => (it.dni || it.telefono) && it.tipo !== 'bloqueo');
+    if (!candidatos.length) return;
+    const filas = await listarPacientesConsolidados({ cache: true });
+    // Mapas valor -> fichaId; null si el valor está en más de una ficha (ambiguo).
+    const mapa = (clave) => {
+      const m = new Map();
+      for (const f of filas) {
+        const k = clave(f);
+        if (!k || !f.fichaId) continue;
+        m.set(k, m.has(k) && m.get(k) !== f.fichaId ? null : f.fichaId);
+      }
+      return m;
+    };
+    const porDni = mapa((f) => f.dni && normalizarDni(f.dni));
+    const porTel = mapa((f) => f.telefono && normalizarTelefonoMapeo(f.telefono));
+    for (const it of candidatos) {
+      const fichaId = it.dni ? porDni.get(normalizarDni(it.dni)) : porTel.get(normalizarTelefonoMapeo(it.telefono));
+      if (fichaId) it.fichaId = fichaId;
+    }
+  } catch { /* sin fichaId: no se muestra el botón QR */ }
+}
+
 export default async function handler(req, res) {
   if (!isValidGestionKey(req.query.key)) {
     return res.status(401).json({ error: 'unauthorized' });
@@ -29,10 +56,11 @@ export default async function handler(req, res) {
           const bloqueo = ev.__tipo === 'bloqueo';
           return { id: ev.id, calendarId: ev.calendarId || '', start: start.toISOString(), end: end.toISOString(),
             title: ev.summary || '', description: ev.description || '', tipo: bloqueo ? 'bloqueo' : ev.__tipo,
-            allDay: false, telefono: extraerTelefono(ev.description), dni: extraerDni(ev.description),
+            allDay: false, telefono: extraerTelefono(ev.description) || ev.__telefono || '', dni: extraerDni(ev.description) || ev.__dni || '',
             codigoCorto: extraerCodigoCorto(ev.description), esNuevoPaciente: extraerEsNuevoPaciente(ev.description),
             telefonoVerificado: extraerTelefonoVerificado(ev.description), confirmado: extraerConfirmado(ev.description) };
         });
+        await asignarFichaId(items);
         items.sort((a, b) => new Date(a.start) - new Date(b.start));
         return res.status(200).json(items);
       }
@@ -105,32 +133,7 @@ export default async function handler(req, res) {
       });
     });
 
-    // Ficha confirmada (para el botón QR "Mis datos"): solo si el DNI del turno coincide
-    // EXACTO con una persona del registro consolidado que ya tiene ficha. Si algo falla
-    // o hay duda, no se marca nada (sin fichaId no aparece el botón).
-    try {
-      const candidatos = items.filter((it) => (it.dni || it.telefono) && it.tipo !== 'bloqueo');
-      if (candidatos.length) {
-        const filas = await listarPacientesConsolidados({ cache: true });
-        // Mapas valor -> fichaId; null si el valor está en más de una ficha (ambiguo).
-        const mapa = (clave) => {
-          const m = new Map();
-          for (const f of filas) {
-            const k = clave(f);
-            if (!k || !f.fichaId) continue;
-            m.set(k, m.has(k) && m.get(k) !== f.fichaId ? null : f.fichaId);
-          }
-          return m;
-        };
-        const porDni = mapa((f) => f.dni && normalizarDni(f.dni));
-        const porTel = mapa((f) => f.telefono && normalizarTelefonoMapeo(f.telefono));
-        for (const it of candidatos) {
-          // DNI primero (identificador principal); teléfono solo si el turno no tiene DNI.
-          const fichaId = it.dni ? porDni.get(normalizarDni(it.dni)) : porTel.get(normalizarTelefonoMapeo(it.telefono));
-          if (fichaId) it.fichaId = fichaId;
-        }
-      }
-    } catch { /* sin fichaId: no se muestra el botón QR */ }
+    await asignarFichaId(items);
 
     items.sort((a, b) => new Date(a.start) - new Date(b.start));
 

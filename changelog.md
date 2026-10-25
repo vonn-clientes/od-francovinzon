@@ -739,3 +739,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-24 — Fix urgente: `getConfig` vuelve a leer de Google las claves aún no migradas
 - Tras el fix de `escrituraPrimariaActiva` (#85), `getConfig` devolvía el default si la clave no estaba en Supabase: `reservaOnlinePausada` (default = pausada) y `horarios` no estaban migradas → riesgo de reserva online pausada. Ahora, si falta la clave, se lee de Google (solo lectura) y se copia a Supabase. Cuando Supabase tenga las 5 claves (textos, listas, radios, horarios, reservaOnlinePausada), Google deja de usarse solo.
+
+## 2026-10-25 — Fix: turnos sin `fichaId` en /gestion con la agenda en Supabase
+- `api/gestion/turnos-dia.js`: la rama `SUPABASE_AGENDA_PRIMARY` devolvía la lista antes de asignar `fichaId`, por eso /gestion mostraba "Crear ficha" en todos los turnos. La asignación (DNI exacto, o teléfono si no hay DNI; ambiguo = no asigna) pasó a `asignarFichaId()` y se usa en ambas ramas, para cualquier fecha (pasada, actual o futura). `lib/agendaSupabase.js` expone `__dni`/`__telefono` de las columnas como respaldo si la descripción no los trae. Test: `tests/turnosDiaFichaId.test.js`. Tests 122/122.

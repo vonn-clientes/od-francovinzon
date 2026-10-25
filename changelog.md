@@ -732,3 +732,7 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-24 — Fix: `escrituraPrimariaActiva()` sin argumento siempre daba false
 - `lib/escrituraPrimaria.js`: el default de `env` pasa de `{}` a `process.env`. Los llamados sin argumento (`lib/adminConfig.js`, `api/gestion/admin.js`) nunca detectaban `SUPABASE_WRITES_PRIMARY`, así que config/logs/horarios seguían cayendo a Google. Detectado con el harness "sin Google". Tests: 119/119.
+
+## 2026-10-24 — Tramos 10–11: handlers sin Google (PENDIENTE de merge hasta aplicar el SQL)
+- Contacto/DNI de turnos, bloqueos de horarios, buscar (tareas/feriados/perfil), pacientes (ficha/teléfono/hoy/cumpleaños/completar-teléfono) y admin (horarios/monitoreo/exports/sin-ficha) usan Supabase con los flags primarios; sin fallback a Google. `mapeos` devuelve `[]` y `metricas-avanzadas` 503 con AGENDA_PRIMARY (falta RPC).
+- SQL: `supabase/agenda_contacto_dni_bloqueo_id.sql` (aplicar ANTES de mergear). Harness dinámico (googleapis parcheado + fetch simulado): 0 llamadas a Google en 52 casos. Tests 121/121.

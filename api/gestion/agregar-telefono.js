@@ -3,6 +3,7 @@ import { avisarFallo } from '../../lib/alertas.js';
 import { upsertPacienteConsolidado } from '../../lib/pacientesConsolidados.js';
 import { espejarTurnosBestEffort } from '../../lib/espejoTurnos.js';
 import { guardarContacto } from '../../lib/actualizarContactoSupabase.js';
+import { agendaPrimariaActiva, leerAgendaRpc, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -28,6 +29,21 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (agendaPrimariaActiva()) {
+      const rows = await leerAgendaRpc('consultorio_agenda_por_id', { p_id: eventId });
+      const turno = Array.isArray(rows) ? rows[0] : rows?.turno || rows;
+      if (!turno) return res.status(404).json({ success: false, message: 'No se encontró el turno.' });
+      let desc = turno.description_original || '';
+      if (/Tel[eé]fono:\s*[^\n]*/i.test(desc)) desc = desc.replace(/Tel[eé]fono:\s*[^\n]*/i, `Teléfono: ${valorGuardar}`);
+      else if (valorGuardar !== '-') desc = `${desc.trimEnd()}${desc.trim() ? '\n' : ''}Teléfono: ${valorGuardar}`;
+      else return res.status(200).json({ success: true, message: 'Sin cambios.', telefono: '', telefonoVerificado: false });
+      if (valorGuardar === '-') desc = desc.replace(/\n?Tel[eé]fono verificado:\s*[^\n]*/i, '');
+      else if (/Tel[eé]fono verificado:\s*[^\n]*/i.test(desc)) desc = desc.replace(/Tel[eé]fono verificado:\s*[^\n]*/i, 'Teléfono verificado: Sí');
+      else desc = desc.replace(/(Tel[eé]fono:\s*[^\n]*)/i, '$1\nTeléfono verificado: Sí');
+      const r = await escribirAgendaRpc('consultorio_agenda_actualizar_contacto', { id: turno.id, telefono: valorGuardar === '-' ? '' : valorGuardar, description_original: desc });
+      if (!r?.ok) throw new Error('No se pudo confirmar la actualización del teléfono.');
+      return res.status(200).json({ success: true, message: crudo ? 'Teléfono actualizado.' : 'Teléfono borrado.', telefono: valorGuardar === '-' ? '' : valorGuardar, telefonoVerificado: valorGuardar !== '-' });
+    }
     const calendar = getCalendarClient();
     const { data: ev } = await calendar.events.get({ calendarId, eventId });
 

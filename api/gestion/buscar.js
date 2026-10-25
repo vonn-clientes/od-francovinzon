@@ -279,10 +279,9 @@ const RANGO_REORGANIZAR_DIAS = 120;
 async function feriadoDelDia(req, res) {
   try {
     const dateStr = req.query.date;
-    const [feriado, calendar] = await Promise.all([
-      esFeriado(dateStr),
-      getCalendarClient(),
-    ]);
+    const feriado = await esFeriado(dateStr);
+    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') return res.status(200).json({ feriado, atendido: false, bloqueado: false });
+    const calendar = getCalendarClient();
     let atendido = false;
     let bloqueado = false;
     if (feriado) {
@@ -332,9 +331,16 @@ async function tareas(req, res) {
     const limiteSinTelefono = new Date(desde.getTime() + RANGO_SIN_TELEFONO_DIAS * 24 * 60 * 60000);
     const hasta = new Date(desde.getTime() + RANGO_REORGANIZAR_DIAS * 24 * 60 * 60000);
 
-    const calendar = getCalendarClient();
-
-    const [principal, sobreturnos] = await Promise.all([
+    let principalItems, sobreItems;
+    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') {
+      const eventos = await eventosAgenda(desde.toISOString(), hasta.toISOString());
+      if (eventos === null) return res.status(503).json({ error: 'No se pudo leer la agenda en Supabase.' });
+      principalItems = eventos.filter((e) => e.__tipo !== 'sobreturno' && e.__tipo !== 'bloqueo').map((e) => ({ id: e.id, summary: e.summary, description: e.description, start: e.start, end: e.end }));
+      sobreItems = eventos.filter((e) => e.__tipo === 'sobreturno').map((e) => ({ id: e.id, summary: e.summary, description: e.description, start: e.start, end: e.end }));
+      eventos.filter((e) => e.__tipo === 'bloqueo').forEach((e) => principalItems.push({ id: e.id, summary: e.summary, description: `${e.description || ''}${BLOCK_MARKER}`, start: e.start, end: e.end }));
+    } else {
+      const calendar = getCalendarClient();
+      const [principal, sobreturnos] = await Promise.all([
       calendar.events.list({
         calendarId: CALENDAR_ID,
         timeMin: desde.toISOString(),
@@ -349,11 +355,14 @@ async function tareas(req, res) {
         singleEvents: true,
         maxResults: 2500,
       }),
-    ]);
+      ]);
+      principalItems = principal.data.items || [];
+      sobreItems = sobreturnos.data.items || [];
+    }
 
     const todos = [
-      ...(principal.data.items || []).map((ev) => ({ ev, calendarId: CALENDAR_ID })),
-      ...(sobreturnos.data.items || []).map((ev) => ({ ev, calendarId: SOBRETURNOS_CALENDAR_ID })),
+      ...principalItems.map((ev) => ({ ev, calendarId: CALENDAR_ID })),
+      ...sobreItems.map((ev) => ({ ev, calendarId: SOBRETURNOS_CALENDAR_ID })),
     ];
 
     // Cruza cada turno con el índice central antes de generar recordatorios. Hasta
@@ -364,6 +373,7 @@ async function tareas(req, res) {
     try { pacientes = await listarPacientesConsolidados({ cache: true }); } catch (err) {
       console.warn('[buscar.js] no se pudo cruzar tareas con fichas:', err?.message || err);
     }
+    if (process.env.SUPABASE_WRITES_PRIMARY === '1' && !pacientes.length) return res.status(503).json({ error: 'No se pudieron leer pacientes desde Supabase.' });
     const porDniFicha = new Map();
     const porTelefonoFicha = new Map();
     const porNombreFicha = new Map();
@@ -372,6 +382,7 @@ async function tareas(req, res) {
     // alguna ficha quedó fuera de sincronía, Drive todavía permite cruzarla por su
     // nombre y DNI del archivo, sin leer cientos de spreadsheets.
     try {
+      if (process.env.SUPABASE_WRITES_PRIMARY === '1') throw new Error('Drive deshabilitado con WRITES_PRIMARY');
       const drive = getPacientesDriveClient();
       let pageToken;
       do {
@@ -429,14 +440,14 @@ async function tareas(req, res) {
     // En fichas históricas el DNI puede estar en C7 aunque falte tanto en la planilla
     // consolidada como en el nombre del archivo. Consultar solo las coincidencias
     // únicas de turnos que generarían la tarea evita un barrido de las ~360 fichas.
-    const sheets = getPacientesSheetsClient();
+    const sheets = process.env.SUPABASE_WRITES_PRIMARY === '1' ? null : getPacientesSheetsClient();
     const idsDniConsultados = new Set();
     for (const { ev } of todos) {
       const { start } = eventBounds(ev);
       if (start >= limiteSinTelefono || extraerDni(ev.description)) continue;
       const ficha = fichaPorTurno(ev);
       if (!ficha) continue;
-      if (!ficha.fichaId || ficha.dni || idsDniConsultados.has(ficha.fichaId)) continue;
+      if (!ficha.fichaId || ficha.dni || idsDniConsultados.has(ficha.fichaId) || !sheets) continue;
       idsDniConsultados.add(ficha.fichaId);
       try {
         ficha.dni = await leerDniFichaTarea(sheets, ficha.fichaId);
@@ -670,17 +681,31 @@ async function perfilPaciente(req, res) {
       : String(p.telefono || '').replace(/\D/g, '').slice(-10) === telefono.replace(/\D/g, '').slice(-10));
     const paciente = (pacienteSupabase && { nombre: pacienteSupabase.nombre, apellido: pacienteSupabase.apellido, dni: pacienteSupabase.dni,
       telefono: pacienteSupabase.telefono, fichaId: pacienteSupabase.id, origen: 'supabase', ficha_json: pacienteSupabase.ficha_json })
-      || (dni ? await buscarPacienteConsolidadoPorDni(dni, { cache: true }) : (telefono ? await buscarPacienteConsolidadoPorTelefono(telefono, { cache: true }) : null));
+      || ((process.env.SUPABASE_WRITES_PRIMARY !== '1') && (dni ? await buscarPacienteConsolidadoPorDni(dni, { cache: true }) : (telefono ? await buscarPacienteConsolidadoPorTelefono(telefono, { cache: true }) : null)));
     if (!paciente) {
       return res.status(200).json({ encontrado: false });
     }
-    const calendar = getCalendarClient();
     const ahora = new Date();
     const desde = new Date(ahora.getTime() - 365 * 24 * 60 * 60000);
     const hasta = new Date(ahora.getTime() + 365 * 24 * 60 * 60000);
 
     const turnos = [];
     const dniNorm = normalizarDni(dni);
+    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') {
+      const eventos = await eventosAgenda(desde.toISOString(), hasta.toISOString());
+      if (eventos === null) return res.status(503).json({ error: 'No se pudo leer la agenda en Supabase.' });
+      eventos.filter((ev) => ev.__tipo !== 'bloqueo').forEach((ev) => {
+        const evDni = normalizarDni(extraerDni(ev.description));
+        const matcheaDni = evDni && evDni === dniNorm;
+        const matcheaNombre = !evDni && (ev.summary || '').trim() === `${paciente.nombre} ${paciente.apellido}`.trim();
+        if (!matcheaDni && !matcheaNombre) return;
+        const inicio = ev.start?.dateTime;
+        const fin = ev.end?.dateTime;
+        if (!inicio || !fin) return;
+        turnos.push({ eventId: ev.id, calendarId: '', title: ev.summary || '', start: new Date(inicio).toISOString(), end: new Date(fin).toISOString(), tipo: ev.__tipo || 'turno', confirmado: /Confirmado:\s*S[ií]/i.test(ev.description || ''), telefono: extraerTelefono(ev.description) });
+      });
+    } else {
+    const calendar = getCalendarClient();
     for (const calendarId of [CALENDAR_ID, SOBRETURNOS_CALENDAR_ID]) {
       let pageToken;
       do {
@@ -711,6 +736,7 @@ async function perfilPaciente(req, res) {
         pageToken = data.nextPageToken;
       } while (pageToken);
     }
+    }
     turnos.sort((a, b) => new Date(a.start) - new Date(b.start));
 
     // Prestaciones de obra social: viven en la ficha (tabla J:M). Si el paciente tiene
@@ -720,7 +746,7 @@ async function perfilPaciente(req, res) {
     if (paciente.ficha_json && Array.isArray(paciente.ficha_json.prestacionesObraSocial)) {
       prestaciones = paciente.ficha_json.prestacionesObraSocial.slice(-8).reverse();
     }
-    if (paciente.fichaId && !String(paciente.fichaId).startsWith('sb-') && !paciente.ficha_json) {
+    if (paciente.fichaId && !String(paciente.fichaId).startsWith('sb-') && !paciente.ficha_json && process.env.SUPABASE_WRITES_PRIMARY !== '1') {
       try {
         const sheets = getPacientesSheetsClient();
         const { data: pres } = await conReintentos(() => sheets.spreadsheets.values.get({ spreadsheetId: paciente.fichaId, range: rangoPrestacionesObraSocial() }));

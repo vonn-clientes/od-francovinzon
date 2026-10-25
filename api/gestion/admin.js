@@ -30,6 +30,7 @@ import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
 import { escrituraPrimariaActiva } from '../../lib/escrituraPrimaria.js';
 import { leerFichaSupabase, leerMovimientosSupabase } from '../../lib/fichaDesdeSupabase.js';
+import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
 
 // Config de solo-lectura que también necesita /pacientes y /gestion (listas
 // desplegables, radios, plantilla de WhatsApp) — no son datos sensibles, así que
@@ -127,6 +128,21 @@ export default async function handler(req, res) {
 
 async function getHorarios(req, res) {
   const config = await obtenerHorariosConfig();
+  if (agendaPrimariaActiva()) {
+    const desde = toArgDate(formatArgDay(new Date()), '00:00');
+    const hasta = new Date(desde.getTime() + 120 * 24 * 60 * 60000);
+    const eventos = await eventosAgenda(desde.toISOString(), hasta.toISOString());
+    if (eventos !== null) {
+      const bloqueos = eventos.filter((e) => e.__tipo === 'bloqueo').map((e) => {
+        const start = new Date(e.start.dateTime || `${e.start.date}T00:00:00-03:00`);
+        const end = new Date(e.end.dateTime || `${e.end.date}T00:00:00-03:00`);
+        const diaCompleto = !!e.start.date;
+        return { id: e.id, motivo: e.summary || '', diaCompleto, fecha: formatArgDay(start), horaInicio: diaCompleto ? null : formatArgTime(start), horaFin: diaCompleto ? null : formatArgTime(end) };
+      }).sort((a,b) => a.fecha.localeCompare(b.fecha));
+      return res.status(200).json({ ...config, bloqueos });
+    }
+    return res.status(503).json({ success: false, error: 'No se pudo leer la agenda en Supabase.' });
+  }
   const calendar = getCalendarClient();
 
   const desde = toArgDate(formatArgDay(new Date()), '00:00');
@@ -159,7 +175,7 @@ async function getHorarios(req, res) {
 
 async function postHorarios(req, res) {
   const { accion } = req.body;
-  const calendar = getCalendarClient();
+  const calendar = agendaPrimariaActiva() ? null : getCalendarClient();
 
   if (accion === 'guardar') {
     const { schedule, slotMinutes, sobreturnoMinutes } = req.body;
@@ -173,6 +189,13 @@ async function postHorarios(req, res) {
 
   if (accion === 'bloquear-dia') {
     const { date, motivo } = req.body;
+    if (agendaPrimariaActiva()) {
+      const start = toArgDate(date, '00:00'), end = toArgDate(nextDayStr(date), '00:00');
+      const r = await escribirAgendaRpc('consultorio_agenda_crear_bloqueo', { inicio: start.toISOString(), fin: end.toISOString(), dia_completo: true, clase: 'bloqueo', motivo: motivo || '', calendar_id: CALENDAR_ID });
+      if (!r?.ok) return res.status(200).json({ success: false, message: 'No se pudo bloquear el día.' });
+      await logActividad({ tipo: 'dia_bloqueado', detalle: `${date}${motivo ? ` — ${motivo}` : ''}`, actor: 'admin' });
+      return res.status(200).json({ success: true });
+    }
     await conReintentos(() => calendar.events.insert({
       calendarId: CALENDAR_ID,
       requestBody: {
@@ -192,6 +215,12 @@ async function postHorarios(req, res) {
     const start = toArgDate(date, horaInicio);
     const end = toArgDate(date, horaFin);
     if (!(end > start)) return res.status(200).json({ success: false, message: 'La hora de fin tiene que ser posterior a la de inicio.' });
+    if (agendaPrimariaActiva()) {
+      const r = await escribirAgendaRpc('consultorio_agenda_crear_bloqueo', { inicio: start.toISOString(), fin: end.toISOString(), dia_completo: false, clase: 'bloqueo', motivo: motivo || '', calendar_id: CALENDAR_ID });
+      if (!r?.ok) return res.status(200).json({ success: false, message: 'No se pudo bloquear ese horario.' });
+      await logActividad({ tipo: 'horario_bloqueado', detalle: `${date} ${horaInicio}-${horaFin}${motivo ? ` — ${motivo}` : ''}`, actor: 'admin' });
+      return res.status(200).json({ success: true });
+    }
     await conReintentos(() => calendar.events.insert({
       calendarId: CALENDAR_ID,
       requestBody: {
@@ -208,6 +237,12 @@ async function postHorarios(req, res) {
 
   if (accion === 'desbloquear') {
     const { eventId } = req.body;
+    if (agendaPrimariaActiva()) {
+      const r = await escribirAgendaRpc('consultorio_agenda_borrar_bloqueo', { id: eventId, clase: 'bloqueo' });
+      if (!r?.ok) return res.status(200).json({ success: false, message: 'No se encontró el bloqueo.' });
+      await logActividad({ tipo: 'bloqueo_eliminado', detalle: eventId, actor: 'admin' });
+      return res.status(200).json({ success: true });
+    }
     await conReintentos(() => calendar.events.delete({ calendarId: CALENDAR_ID, eventId }));
     await espejarTurnosBestEffort();
     await logActividad({ tipo: 'bloqueo_eliminado', detalle: eventId, actor: 'admin' });
@@ -439,9 +474,16 @@ async function getMonitoreo(req, res) {
   const resultados = {};
 
   try {
+    if (agendaPrimariaActiva()) {
+      const hoy = toArgDate(formatArgDay(new Date()), '00:00');
+      const agenda = await eventosAgenda(hoy.toISOString(), new Date(hoy.getTime() + 86400000).toISOString());
+      if (agenda === null) throw new Error('No se pudo consultar la agenda en Supabase.');
+      resultados.calendar = 'ok';
+    } else {
     const calendar = getCalendarClient();
     await getHorariosLibresDia(calendar, formatArgDay(new Date()));
     resultados.calendar = 'ok';
+    }
   } catch (err) {
     resultados.calendar = 'error';
     resultados.calendarError = err?.message || String(err);
@@ -1215,15 +1257,23 @@ function resumirPacientesTotales(pacientes = {}) {
 // Personas con turno en los próximos `dias` días (ambos calendarios, sin bloqueos),
 // una por DNI/teléfono, con el turno más cercano. Para el panel "sin ficha".
 async function leerProximosTurnosPersonas(dias) {
-  const calendar = getCalendarClient();
   // Desde las 00:00 de HOY (hora Argentina), para incluir también los turnos de hoy ya pasados.
   const hoyArg = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const inicio = toArgDate(hoyArg, '00:00');
   const timeMin = inicio.toISOString();
   const timeMax = new Date(inicio.getTime() + dias * 86400000).toISOString();
+  let evs;
+  if (agendaPrimariaActiva()) {
+    const eventos = await eventosAgenda(timeMin, timeMax);
+    if (eventos === null) throw new Error('No se pudieron leer próximos turnos en Supabase.');
+    evs = eventos.filter((ev) => ev.__tipo !== 'bloqueo').map((ev) => ({ id: ev.id, summary: ev.summary, description: ev.description, start: ev.start }));
+  } else {
+  const calendar = getCalendarClient();
   const [a, b] = await Promise.all([CALENDAR_ID, SOBRETURNOS_CALENDAR_ID].map((calendarId) =>
     conReintentos(() => calendar.events.list({ calendarId, timeMin, timeMax, singleEvents: true, orderBy: 'startTime', maxResults: 2500 }))));
-  const evs = [...(a.data.items || []), ...(b.data.items || [])]
+  evs = [...(a.data.items || []), ...(b.data.items || [])];
+  }
+  evs = evs
     .filter((ev) => ev.start?.dateTime && !(ev.description || '').includes(BLOCK_MARKER) && (ev.summary || '').trim())
     .sort((x, y) => x.start.dateTime.localeCompare(y.start.dateTime));
   const out = [];
@@ -1384,6 +1434,7 @@ async function getSeguimiento(req, res) {
 }
 
 async function getMetricasAvanzadas(req, res) {
+  if (agendaPrimariaActiva()) return res.status(503).json({ success: false, error: 'Métricas avanzadas aún no están disponibles desde Supabase.' });
   const calendar = getCalendarClient();
   const config = await obtenerHorariosConfig();
   const hoy = new Date();
@@ -1512,19 +1563,23 @@ function nombreArchivoSeguro(texto) {
 
 async function exportTurnos(req, res) {
   const { desde, hasta, formato } = req.query;
-  const calendar = getCalendarClient();
   const timeMin = toArgDate(desde, '00:00').toISOString();
   const timeMax = new Date(toArgDate(hasta, '00:00').getTime() + 24 * 60 * 60000).toISOString();
-
+  let calendarEvents;
+  if (agendaPrimariaActiva()) {
+    const eventos = await eventosAgenda(timeMin, timeMax);
+    if (eventos === null) return res.status(503).json({ success: false, error: 'No se pudieron exportar turnos desde Supabase.' });
+    calendarEvents = eventos.filter((e) => e.__tipo !== 'bloqueo').map((e) => ({ summary: e.summary, description: e.description, start: e.start, end: e.end, __tipo: e.__tipo }));
+  } else {
+  const calendar = getCalendarClient();
   const [principal, sobreturnos] = await Promise.all([
     conReintentos(() => calendar.events.list({ calendarId: CALENDAR_ID, timeMin, timeMax, singleEvents: true, maxResults: 2500 })),
     conReintentos(() => calendar.events.list({ calendarId: SOBRETURNOS_CALENDAR_ID, timeMin, timeMax, singleEvents: true, maxResults: 2500 })),
   ]);
+  calendarEvents = [...(principal.data.items || []).map((ev) => ({ ...ev, __tipo: 'turno' })), ...(sobreturnos.data.items || []).map((ev) => ({ ...ev, __tipo: 'sobreturno' }))];
+  }
 
-  const filas = [
-    ...(principal.data.items || []).map((ev) => ({ ev, tipo: 'Turno' })),
-    ...(sobreturnos.data.items || []).map((ev) => ({ ev, tipo: 'Sobreturno' })),
-  ]
+  const filas = calendarEvents.map((ev) => ({ ev, tipo: ev.__tipo === 'sobreturno' ? 'Sobreturno' : 'Turno' }))
     .filter(({ ev }) => !(ev.description || '').includes(BLOCK_MARKER))
     .map(({ ev, tipo }) => {
       const { start } = eventBounds(ev);
@@ -1680,7 +1735,6 @@ async function exportPerfilPacientes(req, res) {
   const hasta = new Date();
   const desde = new Date(hasta.getTime() - meses * 30.44 * 24 * 60 * 60000);
   try {
-    const calendar = getCalendarClient();
     const listarTodo = async (calendarId) => {
       let items = [];
       let pageToken;
@@ -1695,7 +1749,16 @@ async function exportPerfilPacientes(req, res) {
       } while (pageToken);
       return items;
     };
-    const [principal, sobre] = await Promise.all([listarTodo(CALENDAR_ID), listarTodo(SOBRETURNOS_CALENDAR_ID)]);
+    let principal, sobre;
+    if (agendaPrimariaActiva()) {
+      const eventos = await eventosAgenda(desde.toISOString(), hasta.toISOString());
+      if (eventos === null) throw new Error('No se pudieron leer turnos desde Supabase.');
+      principal = eventos.filter((ev) => ev.__tipo !== 'sobreturno').map((ev) => ({ start: ev.start, end: ev.end, description: ev.description }));
+      sobre = eventos.filter((ev) => ev.__tipo === 'sobreturno').map((ev) => ({ start: ev.start, end: ev.end, description: ev.description }));
+    } else {
+      const calendar = getCalendarClient();
+      [principal, sobre] = await Promise.all([listarTodo(CALENDAR_ID), listarTodo(SOBRETURNOS_CALENDAR_ID)]);
+    }
     const diaSemanaArg = new Intl.DateTimeFormat('en-US', { timeZone: TIME_ZONE, weekday: 'short' });
     const DIA_IDX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
     [...principal.map((ev) => ({ ev, tipo: 'turno' })), ...sobre.map((ev) => ({ ev, tipo: 'sobreturno' }))]
@@ -1717,6 +1780,7 @@ async function exportPerfilPacientes(req, res) {
       });
   } catch (err) {
     errores.push(`turnos: ${err?.message || err}`);
+    if (agendaPrimariaActiva()) return res.status(503).json({ success: false, error: 'No se pudieron leer turnos desde Supabase.' });
   }
 
   // ---- Visitas / asistencia ----

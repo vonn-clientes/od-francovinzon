@@ -3,6 +3,8 @@
 // Hobby (ver CLAUDE.md). Lecturas por GET con `recurso` (+ `modo` cuando hace falta),
 // escrituras por POST con `recurso` + `accion`. Clave propia: ADMIN_KEY
 // (lib/adminAuth.js), nunca GESTION_KEY — Ayelen no tiene acceso acá.
+import { guardarMapeoSupabase } from '../../lib/mapeosSupabase.js';
+import { mismaPersonaEstricta } from '../../lib/identidadTurno.js';
 import zlib from 'node:zlib';
 import { isValidAdminKey } from '../../lib/adminAuth.js';
 import { isValidGestionKey } from '../../lib/googleCalendar.js';
@@ -1358,14 +1360,10 @@ async function getSinFicha(req, res) {
   });
   const claveDni = (v) => normalizarDni(v);
   const claveTel = (v) => normalizarTelefonoMapeo(v);
-  // Identidad: el DNI manda. El teléfono solo cuenta si alguno de los dos no tiene DNI
-  // (familiares comparten teléfono: no son la misma persona si los DNI son distintos).
-  const mismaPersona = (a, b) => {
-    const da = claveDni(a.dni), db = claveDni(b.dni);
-    if (da && db) return da === db;
-    return !!claveTel(a.telefono) && claveTel(a.telefono) === claveTel(b.telefono);
-  };
-  const turnoDe = (dni, tel) => proximos.find((t) => mismaPersona({ dni, telefono: tel }, t));
+  // Identidad sin dudas (lib/identidadTurno.js): DNI idéntico, o (si falta el DNI) nombre completo exacto + mismo teléfono.
+  // Todo lo demás —nombre parecido, teléfono compartido— queda acá, en "sin ficha", para asignarlo a mano.
+  const mismaPersona = mismaPersonaEstricta;
+  const turnoDe = (dni, tel, nombre) => proximos.find((t) => mismaPersona({ dni, telefono: tel, nombre }, t));
   const sinFicha = filas
     .filter((f) => !f.fichaId)
     .map((f) => ({
@@ -1373,10 +1371,10 @@ async function getSinFicha(req, res) {
       candidatas: candidatasParaFicha(f, filasConFichasDeDrive),
       fila: f.fila, nombre: `${f.nombre} ${f.apellido}`.trim(), dni: f.dni, telefono: f.telefono,
       turnosPasados: f.turnosPasados || 0, ultimaVisita: f.ultimaVisita || '',
-      proximoTurno: turnoDe(f.dni, f.telefono)?.start || '',
+      proximoTurno: turnoDe(f.dni, f.telefono, `${f.nombre || ''} ${f.apellido || ''}`)?.start || '',
     }));
   // Personas con turno próximo que NO están en la planilla (o están con ficha → se omiten).
-  const enPlanilla = (t) => filas.some((f) => mismaPersona(t, f));
+  const enPlanilla = (t) => filas.some((f) => !f.fichaId && mismaPersona(t, f)); // ya figura arriba como fila sin ficha
   const conFicha = (t) => filas.some((f) => f.fichaId && mismaPersona(t, f));
   const virtuales = [];
   let sinDatosClave = 0;
@@ -1405,6 +1403,18 @@ async function getSinFicha(req, res) {
   res.status(200).json({ success: true, sinFicha: sinFichaTodos, sinDatosClave, fichas: [] });
 }
 
+// Al asignar a mano una persona a una ficha, se guarda también el "Sí" de "¿Es este paciente?"
+// (teléfono + DNI de la ficha): así /pacientes la reconoce sola y deja de preguntar por esa persona.
+// Best-effort: nunca rompe la asignación.
+async function recordarMapeoAsignacion({ telefono, fichaId, filas }) {
+  try {
+    if (!escrituraPrimariaActiva()) return;
+    const tel = normalizarTelefonoMapeo(telefono);
+    const dni = normalizarDni((filas.find((f) => f.fichaId === fichaId && normalizarDni(f.dni)) || {}).dni);
+    if (tel && dni) await guardarMapeoSupabase({ telefono: tel, dni, decision: 'si' });
+  } catch (err) { console.warn('[admin.js] no se pudo guardar el mapeo de la asignación:', err?.message || err); }
+}
+
 // Asigna a mano una persona de turnos a una ficha existente (o, con lote:true, todas las
 // coincidencias exactas por nombre, de a 25 por llamada).
 async function postAsignarFicha(req, res) {
@@ -1422,6 +1432,9 @@ async function postAsignarFicha(req, res) {
     if (dniV && previas.some((f) => f.fichaId && f.fichaId !== req.body.fichaId && normalizarDni(f.dni) === dniV)) {
       return res.status(400).json({ success: false, error: 'El DNI de esta persona ya pertenece a otra ficha.' });
     }
+    if (!dniV && telV && previas.some((f) => f.fichaId && f.fichaId !== req.body.fichaId && normalizarTelefonoMapeo(f.telefono) === telV)) {
+      return res.status(400).json({ success: false, error: 'Ese teléfono ya está asociado a otra ficha (familiar). Cargá el DNI de esta persona en el turno y volvé a asignarla.' });
+    }
     // Si el teléfono ya es de otra persona (otro DNI, p. ej. un familiar), no se usa:
     // el upsert fusionaría las dos filas y pisaría el DNI de la otra.
     const telOcupado = dniV && telV && previas.some((f) => normalizarTelefonoMapeo(f.telefono) === telV && normalizarDni(f.dni) !== dniV);
@@ -1432,10 +1445,15 @@ async function postAsignarFicha(req, res) {
     const despues = await listarPacientesConsolidados();
     const creada = dniV ? despues.find((f) => normalizarDni(f.dni) === dniV) : despues.find((f) => telV && normalizarTelefonoMapeo(f.telefono) === telV);
     if (!creada || creada.fichaId !== req.body.fichaId) return res.status(500).json({ success: false, error: 'No se pudo confirmar la asignación. Probá de nuevo.' });
+    await recordarMapeoAsignacion({ telefono: v.telefono, fichaId: req.body.fichaId, filas: despues });
     return res.status(200).json({ success: true, fila: creada.fila });
   }
   const r = await asignarFilaAFicha(fila, req.body.fichaId);
   if (!r.ok) return res.status(400).json({ success: false, error: r.error });
+  try {
+    const filasAhora = await listarPacientesConsolidados();
+    await recordarMapeoAsignacion({ telefono: filasAhora.find((f) => f.fila === fila)?.telefono, fichaId: req.body.fichaId, filas: filasAhora });
+  } catch { /* best-effort */ }
   await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${r.nombre} asignado a ficha ${req.body.fichaId}`, actor: 'admin' });
   res.status(200).json({ success: true, fila });
 }

@@ -11,13 +11,14 @@ test('turnos-dia asigna fichaId a turnos de pacientes con ficha (agenda en Supab
   const turnos = [
     t('a', { description_original: 'DNI: 30111222', dni: '30111222' }),
     t('b', { description_original: 'sin datos', dni: '40222333' }),
-    t('c', { description_original: '', telefono: '3442999999' }),
+    t('c', { description_original: '', telefono: '3442999999', paciente_nombre: 'Hijo Gomez' }),
+    t('f', { description_original: '', telefono: '3442777777', paciente_nombre: 'Gomez Luis' }),
     t('d', { description_original: '', dni: '55555555' }),
     t('e', { description_original: '', dni: '77777777' }),
   ];
   const consolidados = [
     { id: '1', dni: '30111222', ficha_id: 'F1' }, { id: '2', dni: '40222333', ficha_id: 'F2' },
-    { id: '3', telefono: '3442999999', ficha_id: 'F3' }, { id: '4', dni: '55555555', ficha_id: 'F4' }, { id: '5', dni: '55555555', ficha_id: 'F5' },
+    { id: '3', telefono: '3442999999', nombre: 'Padre', apellido: 'Gomez', ficha_id: 'F3' }, { id: '6', telefono: '3442777777', nombre: 'Luis', apellido: 'Gomez', ficha_id: 'F6' }, { id: '4', dni: '55555555', ficha_id: 'F4' }, { id: '5', dni: '55555555', ficha_id: 'F5' },
   ];
   globalThis.fetch = async (url) => {
     const n = String(url).match(/rpc\/(\w+)/)?.[1];
@@ -32,6 +33,7 @@ test('turnos-dia asigna fichaId a turnos de pacientes con ficha (agenda en Supab
   assert.equal(porId.a, 'F1');
   assert.equal(porId.b, 'F2');
   assert.equal(porId.c, undefined, 'el teléfono nunca asigna ficha (hijos con teléfono del padre)');
+  assert.equal(porId.f, 'F6', 'sin DNI: nombre completo exacto + mismo teléfono');
   assert.equal(porId.d, undefined, 'DNI en dos fichas = ambiguo, no se asigna');
   assert.equal(porId.e, undefined);
 });

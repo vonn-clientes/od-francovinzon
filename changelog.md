@@ -767,3 +767,7 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-10-25 — Botón "Pasar configuración" en /admin → Accesos
 - Llama a `sellar-config` (ver entrada anterior) sin necesidad de terminal.
+
+## 2026-10-25 — Menos dudas turno↔ficha (el "¿Es este paciente?" se mantiene)
+- `lib/identidadTurno.js` (`mismaPersonaEstricta`): misma persona = DNI idéntico, o (sin DNI) nombre completo exacto + mismo teléfono; el teléfono solo nunca alcanza. `getSinFicha` (admin) lo usa: todo turno con nombre parecido/teléfono compartido aparece en /admin → Pacientes sin ficha para asignarlo a mano (antes quedaba oculto por el cruce por teléfono). `turnos-dia` usa la misma regla para `fichaId`.
+- Al asignar a mano en /admin (`asignar-ficha`) se guarda también el "Sí" del mapeo teléfono↔DNI, así /pacientes deja de preguntar "¿Es este paciente?" por esa persona. Se rechaza asignar un turno sin DNI cuyo teléfono ya es de otra ficha (familiar). Tests 130/130.

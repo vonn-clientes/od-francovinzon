@@ -8,7 +8,7 @@ import { isValidAdminKey } from '../../lib/adminAuth.js';
 import { isValidGestionKey } from '../../lib/googleCalendar.js';
 import {
   getCalendarClient, CALENDAR_ID, SOBRETURNOS_CALENDAR_ID, BLOCK_MARKER, TIME_ZONE, WEEKLY_SCHEDULE,
-  SLOT_MINUTES, pad2, toArgDate, eventBounds, formatArgDay, formatArgTime, extraerTelefono, extraerConfirmado,
+  SLOT_MINUTES, SOBRETURNO_MINUTES, pad2, toArgDate, eventBounds, formatArgDay, formatArgTime, extraerTelefono, extraerConfirmado,
   extraerEsNuevoPaciente, extraerMotivo, getHorariosLibresDia, extraerDni,
 } from '../../lib/googleCalendar.js';
 import { getPacientesDriveClient, getPacientesSheetsClient } from '../../lib/googleOAuthPacientes.js';
@@ -111,6 +111,7 @@ export default async function handler(req, res) {
       if (recurso === 'listas') return await postListas(req, res);
       if (recurso === 'radios') return await postRadios(req, res);
       if (recurso === 'accesos') return await postAccesos(req, res);
+      if (recurso === 'sellar-config') return await conError(sellarConfig, req, res);
       if (recurso === 'asignar-ficha') return await postAsignarFicha(req, res);
       if (recurso === 'desasignar-ficha') return await postDesasignarFicha(req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
@@ -125,6 +126,29 @@ export default async function handler(req, res) {
 }
 
 // ---------- 1. Horarios y agenda ----------
+
+// "Sellar" la configuración en Supabase para poder prescindir de la planilla de Google:
+// cada clave se copia desde Google si existe (getConfig migra sola) y, si no existía en ningún
+// lado, se guarda su valor por defecto. Después se puede activar CONFIG_SOLO_SUPABASE=1.
+async function sellarConfig(req, res) {
+  const SIN_VALOR = { __sinValor: true };
+  const claves = {
+    horarios: { schedule: WEEKLY_SCHEDULE, slotMinutes: SLOT_MINUTES, sobreturnoMinutes: SOBRETURNO_MINUTES },
+    reservaOnlinePausada: true,
+    textos: TEXTOS_DEFAULT,
+    listas: LISTAS_DEFAULT,
+    radios: RADIOS_DEFAULT,
+  };
+  const informe = {};
+  for (const [clave, porDefecto] of Object.entries(claves)) {
+    const previo = await leerConfigVariasRapido([clave]);
+    if (previo && previo[clave] != null) { informe[clave] = 'ya estaba en Supabase'; continue; }
+    const valor = await getConfig(clave, SIN_VALOR);
+    if (valor && valor.__sinValor) { await setConfig(clave, porDefecto); informe[clave] = 'no existía: se guardó el valor por defecto'; }
+    else informe[clave] = 'copiada desde Google';
+  }
+  return res.status(200).json({ success: true, informe });
+}
 
 async function getHorarios(req, res) {
   const config = await obtenerHorariosConfig();

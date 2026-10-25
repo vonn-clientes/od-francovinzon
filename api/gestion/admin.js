@@ -1434,8 +1434,9 @@ async function getSeguimiento(req, res) {
 }
 
 async function getMetricasAvanzadas(req, res) {
-  if (agendaPrimariaActiva()) return res.status(503).json({ success: false, error: 'Métricas avanzadas aún no están disponibles desde Supabase.' });
-  const calendar = getCalendarClient();
+  // Con la agenda en Supabase, ocupación e inasistencia leen turnosDesdeSupabase() y no necesitan
+  // Calendar: no se crea el cliente de Google (si Supabase fallara, esos cálculos informan el error).
+  const calendar = agendaPrimariaActiva() ? null : getCalendarClient();
   const config = await obtenerHorariosConfig();
   const hoy = new Date();
   const anioActual = hoy.getFullYear();

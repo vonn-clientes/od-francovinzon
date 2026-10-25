@@ -38,7 +38,7 @@ test('las lecturas del Tramo 11 tienen rutas Supabase y cortan el fallback bajo 
   assert.match(pacientes, /consultorio_agenda_actualizar_contacto/);
   assert.match(pacientes, /agendaPrimariaActiva\(\)/);
   assert.match(pacientes, /leerMapeosSupabase\(\{ leerGoogle: leerMapeosDesdeGoogle \}\)/);
-  assert.match(admin, /if \(agendaPrimariaActiva\(\)\) return res\.status\(503\).*Métricas avanzadas/s);
+  assert.match(admin, /agendaPrimariaActiva\(\) \? null : getCalendarClient\(\)/);
   assert.match(admin, /async function leerProximosTurnosPersonas[\s\S]*?eventosAgenda/);
   assert.match(admin, /async function exportTurnos[\s\S]*?eventosAgenda/);
   for (const handler of [dni, telefono]) assert.match(handler, /consultorio_agenda_actualizar_contacto/);

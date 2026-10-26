@@ -641,8 +641,11 @@ async function obtenerFicha(req, res) {
       })(), 3000);
       const guardadaTime = Date.parse(respuesta.fila?.drive_modified_time || '');
       const actualTime = Date.parse(respuesta.driveMeta?.modifiedTime || '');
+      // Con Supabase primaria no hay Drive con quien comparar: si la ficha existe, se usa
+      // (antes, las fichas con ficha_version 0 daban 503 porque la comparacion con Drive fallaba).
+      const fichaFila = respuesta.fila?.ficha ?? respuesta.fila?.ficha_json ?? null;
       const guardada = escrituraPrimariaActiva(process.env)
-        ? (Number(respuesta.fila?.ficha_version) > 0 ? (respuesta.fila?.ficha ?? respuesta.fila?.ficha_json ?? null) : fichaSupabaseFresca(respuesta.fila, respuesta.driveMeta?.modifiedTime))
+        ? (fichaFila && typeof fichaFila === 'object' && !Array.isArray(fichaFila) ? fichaFila : null)
         : fichaSupabaseFresca(respuesta.fila, respuesta.driveMeta?.modifiedTime);
       if (guardada) {
         res.setHeader('X-Fuente', 'supabase');

@@ -773,3 +773,4 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 - Al asignar a mano en /admin (`asignar-ficha`) se guarda también el "Sí" del mapeo teléfono↔DNI, así /pacientes deja de preguntar "¿Es este paciente?" por esa persona. Se rechaza asignar un turno sin DNI cuyo teléfono ya es de otra ficha (familiar). Tests 130/130.
 - 2026-10-26: abrir ficha con Supabase primaria ya no exige comparar con Drive; fichas con ficha_version 0 (57) daban 503 'No se pudo leer la ficha en Supabase'.
 - 2026-10-26: lectura de ficha con Supabase primaria espera hasta 8 s (antes 3 s) antes de dar 503.
+- 2026-10-26: crear ficha con Supabase primaria fallaba con 'No se pudo crear la ficha' si el formulario traia email (campo que la ficha no guarda); ahora se ignora.

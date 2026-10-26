@@ -1475,7 +1475,15 @@ async function crearPaciente(req, res) {
 async function crearPacienteInterno({ nombre, apellido, campos = {} }) {
   if (escrituraPrimariaActiva(process.env)) {
     const creada = await crearFichaSupabase({ nombre, apellido, campos });
-    if (creada?.ok) return { success: true, id: creada.id, nombre: aTituloCase(nombre), apellido: aTituloCase(apellido) };
+    if (creada?.ok) {
+      // El email no vive en la ficha sino en el registro central de pacientes (igual que en el
+      // camino Google): se guarda ahi junto con telefono/DNI. Best-effort, nunca rompe la creacion.
+      await upsertPacienteConsolidado({
+        telefono: campos.telefono, nombre: aTituloCase(nombre), apellido: aTituloCase(apellido), dni: campos.dni,
+        fichaId: creada.id, origen: 'ficha', email: String(campos.email || '').trim(),
+      }).catch(() => {});
+      return { success: true, id: creada.id, nombre: aTituloCase(nombre), apellido: aTituloCase(apellido) };
+    }
     if (creada?.motivo === 'dni_duplicado') {
       const fichaExistente = await leerFichaSupabase(creada.id).catch(() => null);
       return { success: false, duplicado: true, id: creada.id,

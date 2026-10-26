@@ -638,7 +638,7 @@ async function obtenerFicha(req, res) {
           ? (await conReintentos(() => drive.files.get({ fileId: id, fields: 'modifiedTime' }))).data
           : null;
         return { driveMeta, fila };
-      })(), 3000);
+      })(), escrituraPrimariaActiva(process.env) ? 8000 : 3000);
       const guardadaTime = Date.parse(respuesta.fila?.drive_modified_time || '');
       const actualTime = Date.parse(respuesta.driveMeta?.modifiedTime || '');
       // Con Supabase primaria no hay Drive con quien comparar: si la ficha existe, se usa

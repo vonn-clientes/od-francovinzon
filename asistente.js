@@ -1,3 +1,15 @@
+// Google Ads: etiqueta + conversión "Clic en WhatsApp" (cualquier link a WhatsApp de la página).
+try {
+  if (typeof gtag === 'function' && !window.__adsWa) {
+    window.__adsWa = true;
+    gtag('config', 'AW-18330946395');
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest && e.target.closest('a[href*="wa.me"], a[href*="api.whatsapp.com"]');
+      if (!a) return;
+      gtag('event', 'conversion', { send_to: 'AW-18330946395/CpmCCMWkiK8dENuW8KRE', transport_type: 'beacon' });
+    }, true);
+  }
+} catch (err) {}
 // Asistente virtual del consultorio: ventana de chat que habla con /api/asistente.
 (() => {
   if (window.__asistente) return; window.__asistente = true;

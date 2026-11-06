@@ -11,6 +11,7 @@ process.env.CONFIG_SOLO_SUPABASE = '1';
 
 const almacen = {};
 let columnaCreacion = 'created_at';
+let actividadMock = [];
 const turno = (o) => ({ tipo: 'turno', estado: 'confirmado', inicio: '2026-11-20T13:00:00Z', ...o });
 const turnos = () => [
   turno({ paciente_nombre: 'Ana Prueba', dni: '30111222', telefono: '3442000001', [columnaCreacion]: '2026-11-02T13:00:00Z' }),
@@ -26,6 +27,7 @@ globalThis.fetch = async (url, init) => {
   const ok = (data) => ({ ok: true, json: async () => data });
   if (nombre === 'consultorio_agenda_listar') return ok({ turnos: turnos() });
   if (nombre === 'consultorio_consolidados_listar') return ok([]);
+  if (nombre === 'consultorio_actividad_recientes') return ok(actividadMock);
   if (nombre === 'consultorio_config_leer_varias') {
     const r = {}; for (const c of cuerpo.p_claves) if (c in almacen) r[c] = almacen[c]; return ok(r);
   }
@@ -63,7 +65,7 @@ test('con ?detalle=1 salen los nombres', async () => {
   assert.deepEqual(r.data.nombres.nuevas, ['Ana Prueba']);
 });
 
-test('sin columna de creación se informa en vez de estimar', async () => {
+test('sin columna de creación y sin registro: no se estima, se informa', async () => {
   columnaCreacion = 'otra_cosa';
   const r = await llamar({ query: { recurso: 'campana-analisis', key: 'clave-test', desde: '2026-11-01', hasta: '2026-11-05' } });
   columnaCreacion = 'created_at';
@@ -71,6 +73,22 @@ test('sin columna de creación se informa en vez de estimar', async () => {
   assert.equal(r.data.nuevas, 0);
   const nota = r.data.noDeterminable.find((n) => n.columnasDisponibles);
   assert.ok(nota && nota.columnasDisponibles.includes('otra_cosa'));
+});
+
+test('sin columna de creación se usa el registro de actividad', async () => {
+  columnaCreacion = 'otra_cosa';
+  actividadMock = [
+    { tipo: 'turno_creado', actor: 'gestión (Ayelen)', fecha: '2026-11-02T13:00:00+00:00', detalle: 'Ana Prueba — 2026-11-20 10:00' },
+    { tipo: 'turno_creado', actor: 'gestión (Ayelen)', fecha: '2026-11-03T13:00:00+00:00', detalle: 'Beto Ejemplo — 2026-11-20 10:00' },
+    { tipo: 'login', actor: 'admin', fecha: '2026-10-20T13:00:00+00:00', detalle: '/admin' },
+  ];
+  const r = await llamar({ query: { recurso: 'campana-analisis', key: 'clave-test', desde: '2026-11-01', hasta: '2026-11-05' } });
+  columnaCreacion = 'created_at'; actividadMock = [];
+  assert.equal(r.status, 200);
+  assert.equal(r.data.turnosCreados, 2);
+  assert.equal(r.data.nuevas, 1); // Ana: sin turnos previos
+  assert.equal(r.data.recurrentes, 1); // Beto: tiene un turno el 10/09
+  assert.ok(r.data.noDeterminable.some((n) => /registro de actividad/.test(n.motivo)));
 });
 
 test('campañas: iniciar, listar con métricas, finalizar', async () => {

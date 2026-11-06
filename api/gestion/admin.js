@@ -32,7 +32,9 @@ import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
 import { escrituraPrimariaActiva } from '../../lib/escrituraPrimaria.js';
 import { leerFichaSupabase, leerMovimientosSupabase } from '../../lib/fichaDesdeSupabase.js';
-import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
+import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc, leerAgendaRpc, turnosDeLectura } from '../../lib/agendaSupabase.js';
+import { analizarPeriodo, metricasCampana, hoyAR, parseFechaFlexible } from '../../lib/campanasAnalisis.js';
+import { randomBytes } from 'node:crypto';
 
 // Config de solo-lectura que también necesita /pacientes y /gestion (listas
 // desplegables, radios, plantilla de WhatsApp) — no son datos sensibles, así que
@@ -103,12 +105,15 @@ export default async function handler(req, res) {
       if (recurso === 'export-pacientes-completo') return await conError(exportPacientesCompleto, req, res);
       if (recurso === 'sin-ficha') return await conError(getSinFicha, req, res);
       if (recurso === 'seguimiento') return await conError(getSeguimiento, req, res);
+      if (recurso === 'campana-analisis') return await getCampanaAnalisis(req, res);
+      if (recurso === 'campanas') return await conError(getCampanas, req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
     if (req.method === 'POST') {
       if (recurso === 'horarios') return await postHorarios(req, res);
       if (recurso === 'reserva-online') return await postReservaOnline(req, res);
+      if (recurso === 'campanas') return await conError(postCampanas, req, res);
       if (recurso === 'textos') return await postTextos(req, res);
       if (recurso === 'listas') return await postListas(req, res);
       if (recurso === 'radios') return await postRadios(req, res);
@@ -125,6 +130,147 @@ export default async function handler(req, res) {
     await avisarFallo({ endpoint: 'api/gestion/admin.js', detalle: `${req.method} ${req.query?.recurso || req.body?.recurso || ''}`, error: err });
     res.status(500).json({ success: false, error: 'Error inesperado.' });
   }
+}
+
+// ---------- Campañas (solo lectura sobre turnos + totales por campaña) ----------
+// Cuenta PERSONAS NUEVAS por la fecha de CREACIÓN del turno (ver lib/campanasAnalisis.js).
+// Nada de datos de pacientes en logs: las respuestas llevan solo totales; los nombres salen
+// únicamente con ?detalle=1 y los casos dudosos se identifican por los últimos 2 dígitos.
+const LECTURA_ATRAS_MS = 2 * 365 * 24 * 60 * 60 * 1000; // historial para saber si alguien ya había sacado turno
+const LECTURA_ADELANTE_MS = 400 * 24 * 60 * 60 * 1000; // el turno puede ser para meses después de haberlo creado
+const CAMPOS_CREACION_AGENDA = ['created_at', 'creado_en', 'creado', 'calendar_created', 'fecha_creacion', 'inserted_at'];
+
+async function leerRegistrosAgenda() {
+  const ahora = Date.now();
+  const desdeLectura = new Date(ahora - LECTURA_ATRAS_MS).toISOString();
+  const hastaLectura = new Date(ahora + LECTURA_ADELANTE_MS).toISOString();
+  const digitos = (s) => String(s || '').replace(/\D/g, '');
+
+  if (agendaPrimariaActiva()) {
+    const datos = await leerAgendaRpc('consultorio_agenda_listar', { p_desde: desdeLectura, p_hasta: hastaLectura }, { timeoutMs: 20000 });
+    if (!datos) return { error: 'No se pudo leer la agenda en Supabase.' };
+    const filas = turnosDeLectura(datos);
+    const campo = CAMPOS_CREACION_AGENDA.find((k) => filas.some((f) => f && f[k]));
+    const notas = [{ motivo: 'La lectura de la agenda no incluye turnos cancelados: quien sacó turno y lo canceló no se cuenta.' }];
+    if (!campo) {
+      return { registros: [], noDeterminable: [...notas, {
+        motivo: 'La agenda en Supabase no trae ninguna columna con la fecha de creación del turno.',
+        columnasDisponibles: Object.keys(filas[0] || {}),
+      }] };
+    }
+    const registros = filas
+      .filter((t) => t && t.tipo !== 'bloqueo' && String(t.paciente_nombre || '').trim())
+      .map((t) => ({
+        dni: digitos(t.dni), telefono: digitos(t.telefono), nombre: String(t.paciente_nombre).trim(),
+        creado: Date.parse(t[campo]), inicio: Date.parse(t.inicio),
+      }));
+    return { registros, noDeterminable: notas };
+  }
+
+  let calendar;
+  try { calendar = getCalendarClient(); } catch { return { error: 'No se pudo leer la agenda.' }; }
+  const registros = [];
+  try {
+    for (const calendarId of [CALENDAR_ID, SOBRETURNOS_CALENDAR_ID]) {
+      let pageToken;
+      do {
+        const { data } = await conReintentos(() => calendar.events.list({
+          calendarId, timeMin: desdeLectura, timeMax: hastaLectura, singleEvents: true, showDeleted: false,
+          maxResults: 2500, pageToken, fields: 'nextPageToken,items(id,summary,description,status,created,start)',
+        }));
+        for (const e of data.items || []) {
+          const nombre = String(e.summary || '').trim();
+          if (e.status === 'cancelled' || !nombre || String(e.description || '').includes(BLOCK_MARKER)) continue;
+          registros.push({
+            dni: digitos(extraerDni(e.description)), telefono: digitos(extraerTelefono(e.description)), nombre,
+            creado: Date.parse(e.created), inicio: Date.parse(e.start?.dateTime || e.start?.date),
+          });
+        }
+        pageToken = data.nextPageToken;
+      } while (pageToken);
+    }
+  } catch {
+    return { error: 'No se pudo completar la lectura paginada de la agenda.' };
+  }
+  return { registros, noDeterminable: [{ motivo: 'La lectura de la agenda no incluye turnos cancelados: quien sacó turno y lo canceló no se cuenta.' }] };
+}
+
+async function cargarBaseCampanas() {
+  const agenda = await leerRegistrosAgenda();
+  if (agenda.error) return agenda;
+  const cons = await listarPacientesConsolidados({ cache: true, fallbackGoogle: !escrituraPrimariaActiva(process.env) }).catch(() => null);
+  const noDeterminable = [...(agenda.noDeterminable || [])];
+  let padron = [];
+  if (Array.isArray(cons)) {
+    padron = cons.map((p) => ({ dni: p.dni, telefono: p.telefono, nombre: `${p.nombre || ''} ${p.apellido || ''}`.trim(), ficha: !!p.fichaId, ultimaVisita: parseFechaFlexible(p.ultimaVisita) }));
+  } else {
+    noDeterminable.push({ motivo: 'No se pudo leer el padrón de pacientes: no se puede distinguir quién ya tenía ficha.' });
+  }
+  return { registros: agenda.registros, padron, noDeterminable };
+}
+
+const esFechaYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00-03:00`));
+
+async function getCampanaAnalisis(req, res) {
+  const { desde, hasta } = req.query || {};
+  if (!esFechaYmd(desde) || !esFechaYmd(hasta) || desde > hasta) return res.status(400).json({ success: false, error: 'desde y hasta deben ser fechas YYYY-MM-DD válidas.' });
+  const base = await cargarBaseCampanas();
+  if (base.error) return res.status(503).json({ success: false, error: base.error });
+  const salida = analizarPeriodo({ registros: base.registros, padron: base.padron, desde, hasta, detalle: req.query?.detalle === '1' });
+  salida.noDeterminable.push(...base.noDeterminable);
+  return res.status(200).json(salida);
+}
+
+async function getCampanas(req, res) {
+  const campanas = await getConfig('campanas', []);
+  const lista = Array.isArray(campanas) ? campanas : [];
+  const idPedido = req.query?.id;
+  const detalle = req.query?.detalle === '1' && !!idPedido;
+  const aMostrar = idPedido ? lista.filter((c) => c.id === idPedido) : lista;
+  if (!aMostrar.length) return res.status(200).json({ campanas: [] });
+  const base = await cargarBaseCampanas();
+  if (base.error) return res.status(200).json({ campanas: aMostrar.map((c) => ({ ...c, metricas: null })), error: base.error });
+  const hoy = hoyAR();
+  const salida = aMostrar.map((c) => {
+    const metricas = metricasCampana({ campana: c, registros: base.registros, padron: base.padron, hoy, detalle });
+    metricas.noDeterminable.push(...base.noDeterminable);
+    return { ...c, metricas };
+  });
+  return res.status(200).json({ campanas: salida });
+}
+
+async function postCampanas(req, res) {
+  const { accion } = req.body || {};
+  const lista = await getConfig('campanas', []);
+  const campanas = Array.isArray(lista) ? lista : [];
+  const hoy = hoyAR();
+  if (accion === 'iniciar') {
+    const nombre = String(req.body.nombre || '').trim().slice(0, 80);
+    const inicio = req.body.inicio ? String(req.body.inicio) : hoy;
+    // Pesos en formato argentino: "50.000" = cincuenta mil, "50.000,50" con coma decimal. Si ya viene
+    // un número (no texto), se usa tal cual.
+    const crudo = req.body.inversion;
+    const inversionTexto = typeof crudo === 'number' ? String(crudo) : String(crudo ?? '').replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '');
+    const inversion = inversionTexto === '' ? null : Number(inversionTexto);
+    if (!nombre) return res.status(400).json({ success: false, error: 'Falta el nombre de la campaña.' });
+    if (!esFechaYmd(inicio)) return res.status(400).json({ success: false, error: 'La fecha de inicio no es válida.' });
+    if (inversion !== null && !(inversion >= 0)) return res.status(400).json({ success: false, error: 'La inversión no es válida.' });
+    const campana = { id: randomBytes(4).toString('hex'), nombre, inicio, fin: null, inversion };
+    await setConfig('campanas', [...campanas, campana]);
+    await logActividad({ tipo: 'campana_iniciada', detalle: nombre, actor: 'admin' });
+    return res.status(200).json({ success: true, campana });
+  }
+  if (accion === 'finalizar') {
+    const c = campanas.find((x) => x.id === req.body.id);
+    if (!c) return res.status(404).json({ success: false, error: 'No existe esa campaña.' });
+    if (c.fin) return res.status(400).json({ success: false, error: 'La campaña ya estaba finalizada.' });
+    const fin = req.body.fin ? String(req.body.fin) : hoy;
+    if (!esFechaYmd(fin) || fin < c.inicio) return res.status(400).json({ success: false, error: 'La fecha de cierre no es válida.' });
+    await setConfig('campanas', campanas.map((x) => (x.id === c.id ? { ...x, fin } : x)));
+    await logActividad({ tipo: 'campana_finalizada', detalle: c.nombre, actor: 'admin' });
+    return res.status(200).json({ success: true });
+  }
+  return res.status(400).json({ success: false, error: 'acción inválida' });
 }
 
 // ---------- 1. Horarios y agenda ----------

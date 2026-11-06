@@ -103,6 +103,7 @@ export default async function handler(req, res) {
       if (recurso === 'export-pacientes-completo') return await conError(exportPacientesCompleto, req, res);
       if (recurso === 'sin-ficha') return await conError(getSinFicha, req, res);
       if (recurso === 'seguimiento') return await conError(getSeguimiento, req, res);
+      if (recurso === 'campana-analisis') return await getCampanaAnalisis(req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
@@ -125,6 +126,101 @@ export default async function handler(req, res) {
     await avisarFallo({ endpoint: 'api/gestion/admin.js', detalle: `${req.method} ${req.query?.recurso || req.body?.recurso || ''}`, error: err });
     res.status(500).json({ success: false, error: 'Error inesperado.' });
   }
+}
+
+// Análisis de solo lectura. Calendar es la fuente de creación cuando sigue siendo
+// la agenda primaria; la agenda Supabase actual no expone created_at en su RPC.
+async function getCampanaAnalisis(req, res) {
+  const { desde, hasta } = req.query || {};
+  const detalle = req.query?.detalle === '1';
+  const fechaValida = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00-03:00`));
+  if (!fechaValida(desde) || !fechaValida(hasta) || desde > hasta) return res.status(400).json({ success: false, error: 'desde y hasta deben ser fechas YYYY-MM-DD válidas.' });
+  const salida = { turnosCreados: 0, personasDistintas: 0, nuevas: 0, recurrentes: 0, dudosos: [], noDeterminable: [] };
+  // No usar el espejo de Calendar para fechar eventos si la escritura primaria ya migró.
+  if (agendaPrimariaActiva()) {
+    salida.noDeterminable.push({ motivo: 'La agenda primaria Supabase no expone la fecha de creación; Calendar puede ser un espejo atrasado.' });
+    return res.status(200).json(salida);
+  }
+  const parseStart = new Date(`${desde}T00:00:00-03:00`);
+  const upper = new Date(`${hasta}T23:59:59.999-03:00`);
+  // Ventana histórica acotada deliberadamente para respetar cuota y duración.
+  const historyStart = new Date(parseStart.getTime() - 2 * 365 * 24 * 60 * 60 * 1000);
+  let calendar;
+  try { calendar = getCalendarClient(); } catch { return res.status(503).json({ success: false, error: 'No se pudo leer la agenda.' }); }
+  const events = [];
+  try {
+    for (const calendarId of [CALENDAR_ID, SOBRETURNOS_CALENDAR_ID]) {
+      let pageToken;
+      do {
+        const { data } = await conReintentos(() => calendar.events.list({
+          // timeMax por fecha del TURNO, no de creación: hay que mirar hacia adelante, porque quien
+          // sacó turno en el rango suele haberlo sacado para días posteriores al rango.
+          calendarId, timeMin: historyStart.toISOString(), timeMax: new Date(upper.getTime() + 400 * 24 * 60 * 60 * 1000).toISOString(), singleEvents: true,
+          showDeleted: true, maxResults: 2500, pageToken,
+          fields: 'nextPageToken,items(id,summary,description,status,created,start,end)',
+        }));
+        events.push(...(data.items || []).map((e) => ({ ...e, __calendarId: calendarId })));
+        pageToken = data.nextPageToken;
+      } while (pageToken);
+    }
+  } catch {
+    return res.status(503).json({ success: false, error: 'No se pudo completar la lectura paginada de la agenda.' });
+  }
+  const cons = await listarPacientesConsolidados({ cache: true, fallbackGoogle: !escrituraPrimariaActiva(process.env) }).catch(() => null);
+  if (!Array.isArray(cons)) {
+    salida.noDeterminable.push({ motivo: 'No se pudo leer el padrón consolidado para cotejar pacientes.' });
+    return res.status(200).json(salida);
+  }
+  const normalizar = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const digits = (s) => String(s || '').replace(/\D/g, '');
+  const esDniPrueba = (d) => !d || d.length < 7 || /^(\d)\1+$/.test(d) || /^(12345678|123456789|22222222|11111111|12312312)$/.test(d);
+  const registros = [];
+  for (const e of events) {
+    if (e.status === 'cancelled') continue;
+    const dni = digits(extraerDni(e.description));
+    const telefono = digits(extraerTelefono(e.description));
+    const title = String(e.summary || '').trim();
+    const esTurno = !String(e.description || '').includes(BLOCK_MARKER) && !!title;
+    if (!esTurno) continue;
+    if (!e.created || Number.isNaN(Date.parse(e.created))) {
+      if (!salida.noDeterminable.some((x) => x.motivo === 'Hay eventos sin fecha de creación disponible.')) salida.noDeterminable.push({ motivo: 'Hay eventos sin fecha de creación disponible.' });
+      continue;
+    }
+    const creado = Date.parse(e.created);
+    registros.push({ dni, telefono, nombre: title, key: dni && !esDniPrueba(dni) ? `d:${dni}` : (telefono ? `t:${telefono}|${normalizar(title)}` : ''), creado, target: creado >= parseStart.getTime() && creado <= upper.getTime() });
+  }
+  const candidatas = registros.filter((r) => r.target);
+  const telDnis = new Map(), dniNames = new Map();
+  for (const r of registros) {
+    if (r.telefono && r.dni && !esDniPrueba(r.dni)) { const set = telDnis.get(r.telefono) || new Set(); set.add(r.dni); telDnis.set(r.telefono, set); }
+    if (r.dni && !esDniPrueba(r.dni)) { const set = dniNames.get(r.dni) || new Set(); set.add(normalizar(r.nombre)); dniNames.set(r.dni, set); }
+  }
+  const fichas = cons.filter((p) => p.fichaId);
+  const historial = [...registros.filter((r) => r.creado < parseStart.getTime()), ...cons.map((p) => ({ dni: digits(p.dni), telefono: digits(p.telefono), nombre: `${p.nombre || ''} ${p.apellido || ''}`, ficha: !!p.fichaId }))];
+  // Misma regla estricta que el cruce turno↔ficha (lib/identidadTurno.js): DNI idéntico, o sin DNI
+  // y mismo nombre completo + mismo teléfono. El teléfono solo nunca alcanza (hijos con el teléfono de los padres).
+  const personaPrev = (r) => historial.some((p) => mismaPersonaEstricta(
+    { dni: esDniPrueba(r.dni) ? '' : r.dni, telefono: r.telefono, nombre: r.nombre },
+    { dni: esDniPrueba(digits(p.dni)) ? '' : p.dni, telefono: p.telefono, nombre: p.nombre },
+  ));
+  const seen = new Set();
+  for (const r of candidatas) {
+    const dnisTel = r.telefono ? telDnis.get(r.telefono) : null;
+    const similarDni = r.dni && !esDniPrueba(r.dni) && [...dniNames.entries()].some(([d, ns]) => d !== r.dni && [...ns].some((n) => n && (n.includes(normalizar(r.nombre)) || normalizar(r.nombre).includes(n))));
+    const motivos = [];
+    if (r.dni && esDniPrueba(r.dni)) motivos.push('DNI de prueba o inválido');
+    if (dnisTel?.size > 1) motivos.push('Mismo teléfono asociado a DNI distintos');
+    if (similarDni) motivos.push('Nombre coincidente con DNI distinto');
+    if (!r.dni && !r.telefono) motivos.push('Evento sin DNI ni teléfono');
+    const k = r.key || `n:${normalizar(r.nombre)}`;
+    if (motivos.length) {
+      salida.dudosos.push({ motivo: motivos.join('; '), identificadorParcial: r.dni ? `DNI ••${r.dni.slice(-2)}` : (r.telefono ? `tel. ••${r.telefono.slice(-2)}` : 'sin identificador'), ...(detalle ? { nombre: r.nombre } : {}) });
+      continue;
+    }
+    salida.turnosCreados += 1;
+    if (!seen.has(k)) { seen.add(k); salida.personasDistintas += 1; if (personaPrev(r)) salida.recurrentes += 1; else salida.nuevas += 1; }
+  }
+  return res.status(200).json(salida);
 }
 
 // ---------- 1. Horarios y agenda ----------

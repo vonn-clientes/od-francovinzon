@@ -325,7 +325,7 @@
             Iniciá una campaña cuando arranque la publicidad y finalizala cuando termine. El panel cuenta cuántas
             <strong>personas nuevas</strong> sacaron turno en ese período (por la fecha en que se creó el turno, no
             la del turno) y lo compara con los 30 días anteriores. Los casos dudosos (DNI de prueba, mismo nombre con
-            otro DNI, etc.) no se cuentan: van en una lista aparte para que decidas vos. Por defecto solo se ven
+            otro DNI, etc.) no se cuentan hasta que los resuelvas vos (nuevo, recurrente o descartar). Por defecto solo se ven
             totales; los nombres quedan en un desplegable cerrado.
           </p>
           <div class="field-row">
@@ -674,40 +674,82 @@
 
   // ---------- Campañas ----------
   // Solo totales por defecto (ver api/gestion/admin.js, recurso=campanas): los nombres se piden
-  // aparte (?detalle=1) recién cuando se abre el desplegable de esa campaña.
+  // aparte (?detalle=1) recién cuando se abre un desplegable (nombres, o casos para resolver).
   const fmtPesos = (n) => (n == null ? '—' : `$${Number(n).toLocaleString('es-AR')}`);
   const fmtFechaYmd = (ymd) => (ymd ? ymd.split('-').reverse().join('/') : '');
   function hoyArYmd() {
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   }
+  const esc = (x) => escapeHtmlAdmin(String(x ?? ''));
   function tileCampana(num, label) {
-    return `<div class="stat-tile"><div class="num">${escapeHtmlAdmin(String(num))}</div><div class="label">${escapeHtmlAdmin(label)}</div></div>`;
+    return `<div class="stat-tile"><div class="num">${esc(num)}</div><div class="label">${esc(label)}</div></div>`;
+  }
+  function filaInversionHtml(i = {}) {
+    return `<div class="field-row ce-inv-row" style="align-items:flex-end;margin-bottom:8px;">
+      <div class="field"><label>Concepto</label><input type="text" class="ce-inv-concepto" maxlength="60" placeholder="Ej: Búsqueda" value="${esc(i.concepto || '')}"></div>
+      <div class="field"><label>Monto en pesos</label><input type="text" class="ce-inv-monto" inputmode="decimal" placeholder="Ej: 42.972" value="${i.monto != null ? esc(Number(i.monto).toLocaleString('es-AR')) : ''}"></div>
+      <button type="button" class="btn btn-outline ce-inv-quitar" style="flex:0 0 auto;" aria-label="Quitar inversión">✕</button>
+    </div>`;
+  }
+  function htmlEditarCampana(c) {
+    const filas = c.inversiones.length ? c.inversiones : [{}];
+    return `<div class="camp-editar hidden" style="margin:12px 0;padding:14px;border:1.5px solid var(--line);border-radius:12px;">
+      <div class="field-row">
+        <div class="field"><label>Nombre</label><input type="text" class="ce-nombre" maxlength="80" value="${esc(c.nombre)}"></div>
+        <div class="field"><label>Fecha de inicio</label><input type="date" class="ce-inicio" value="${esc(c.inicio)}"></div>
+        <div class="field"><label>Fecha de cierre (vacía = en curso)</label><input type="date" class="ce-fin" value="${esc(c.fin || '')}"></div>
+      </div>
+      <p class="hint" style="margin-bottom:8px;">Inversiones: se suman y el costo por paciente nuevo usa el total.</p>
+      <div class="ce-inv">${filas.map(filaInversionHtml).join('')}</div>
+      <button type="button" class="btn btn-outline ce-inv-agregar" style="margin-bottom:12px;">+ Agregar inversión</button>
+      <div><button type="button" class="btn btn-primary ce-guardar">Guardar cambios</button> <button type="button" class="btn btn-outline ce-cancelar">Cancelar</button></div>
+      <div class="msg ce-msg"></div>
+    </div>`;
+  }
+  function htmlTablaMotivos(m) {
+    if (!m.porMotivo?.length) return '<p class="hint">No hay turnos creados en este período.</p>';
+    const sinClasificar = m.porMotivo.reduce((a, f) => a + f.sinClasificar, 0);
+    return `<table style="margin-bottom:6px;"><thead><tr><th>Motivo del turno</th><th>Nuevos</th><th>Recurrentes</th><th>Total</th></tr></thead><tbody>
+      ${m.porMotivo.map((f) => `<tr><td>${esc(f.categoria)}</td><td>${f.nuevas}</td><td>${f.recurrentes}</td><td><strong>${f.total}</strong></td></tr>`).join('')}
+    </tbody></table>${sinClasificar ? `<p class="hint">${sinClasificar} turno(s) de personas con ficha de antigüedad no confirmable no figuran como nuevos ni recurrentes hasta que los resuelvas.</p>` : ''}`;
   }
   function htmlCampana(c) {
     const m = c.metricas;
     const abierta = !c.fin;
-    const encabezado = `<h2>${escapeHtmlAdmin(c.nombre)} <span class="hint" style="font-size:12px;">· ${fmtFechaYmd(c.inicio)} → ${abierta ? 'en curso' : fmtFechaYmd(c.fin)}${c.inversion != null ? ` · inversión ${fmtPesos(c.inversion)}` : ''}</span></h2>`;
-    if (!m) return `<div class="card" data-camp="${c.id}">${encabezado}<p class="hint">No se pudieron calcular las métricas ahora. Probá actualizar en un rato.</p></div>`;
+    const total = c.inversiones.reduce((a, i) => a + (Number(i.monto) || 0), 0);
+    const detalleInv = c.inversiones.length > 1 ? ` (${c.inversiones.map((i) => `${esc(i.concepto)} ${fmtPesos(i.monto)}`).join(' + ')})` : '';
+    const encabezado = `<h2>${esc(c.nombre)}${c.archivada ? ' <span class="hint" style="font-size:12px;">(archivada)</span>' : ''} <span class="hint" style="font-size:12px;">· ${fmtFechaYmd(c.inicio)} → ${abierta ? 'en curso' : fmtFechaYmd(c.fin)}${total > 0 ? ` · inversión ${fmtPesos(total)}${detalleInv}` : ''}</span></h2>`;
+    const acciones = `<div style="display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 12px;">
+      <button class="btn btn-outline camp-editar-btn" style="padding:6px 12px;font-size:12px;">✏️ Editar</button>
+      <button class="btn btn-outline camp-archivar" style="padding:6px 12px;font-size:12px;">${c.archivada ? '📂 Desarchivar' : '🗄️ Archivar'}</button>
+      <button class="btn btn-outline camp-eliminar" style="padding:6px 12px;font-size:12px;">🗑️ Eliminar</button>
+      <button class="btn btn-outline camp-export" data-formato="csv" style="padding:6px 12px;font-size:12px;">⬇️ Resumen CSV</button>
+      <button class="btn btn-outline camp-export" data-formato="pdf" style="padding:6px 12px;font-size:12px;">⬇️ Resumen PDF</button>
+    </div>${htmlEditarCampana(c)}`;
+    if (!m) return `<div class="card" data-camp="${c.id}">${encabezado}${acciones}<p class="hint">No se pudieron calcular las métricas ahora. Probá actualizar en un rato.</p></div>`;
     const dif = m.promedioDiarioNuevas - m.promedioDiarioNuevasPrevios30;
-    const dudosos = (m.dudosos || []).length
-      ? `<details style="margin-top:10px;"><summary>${m.dudosos.length} caso(s) dudoso(s) — no se cuentan, decidí vos</summary>
-          <ul style="margin:8px 0 0 18px;font-size:12.5px;">${m.dudosos.map((d) => `<li>${escapeHtmlAdmin(d.motivo)} <span class="hint">(${escapeHtmlAdmin(d.identificadorParcial)})</span></li>`).join('')}</ul></details>`
+    const pendientes = (m.dudosos || []).length + (m.conFicha || []).length;
+    const resueltos = (m.resueltos || []).length;
+    const casos = (pendientes || resueltos)
+      ? `<details class="camp-casos" style="margin-top:10px;"><summary>${pendientes} caso(s) sin resolver${resueltos ? ` · ${resueltos} resuelto(s) a mano` : ''} — decidí vos</summary><div class="camp-casos-cuerpo hint" style="margin-top:8px;">Cargando...</div></details>`
       : '';
     const avisos = (m.noDeterminable || []).length
-      ? `<div class="hint" style="margin-top:10px;">⚠️ No se pudo determinar con los datos disponibles:<ul style="margin:4px 0 0 18px;">${m.noDeterminable.map((n) => `<li>${escapeHtmlAdmin(n.motivo)}${n.columnasDisponibles ? ` (columnas: ${escapeHtmlAdmin(n.columnasDisponibles.join(', '))})` : ''}</li>`).join('')}</ul></div>`
+      ? `<div class="hint" style="margin-top:10px;">⚠️ No se pudo determinar con los datos disponibles:<ul style="margin:4px 0 0 18px;">${m.noDeterminable.map((n) => `<li>${esc(n.motivo)}${n.columnasDisponibles ? ` (columnas: ${esc(n.columnasDisponibles.join(', '))})` : ''}</li>`).join('')}</ul></div>`
       : '';
     return `<div class="card" data-camp="${c.id}">
-      ${encabezado}
+      ${encabezado}${acciones}
       <div class="stat-grid">
         ${tileCampana(m.turnosCreados, 'Turnos creados')}
         ${tileCampana(m.personasDistintas, 'Personas distintas')}
         ${tileCampana(m.nuevas, 'Nuevas')}
         ${tileCampana(m.recurrentes, 'Recurrentes')}
         ${tileCampana(`${m.promedioDiarioNuevas.toLocaleString('es-AR')} / día`, `Nuevas por día (antes: ${m.promedioDiarioNuevasPrevios30.toLocaleString('es-AR')})`)}
-        ${tileCampana(fmtPesos(m.costoPorNueva), c.inversion != null ? 'Costo por paciente nuevo' : 'Costo por nuevo (cargá la inversión)')}
+        ${tileCampana(fmtPesos(m.costoPorNueva), total > 0 ? 'Costo por paciente nuevo' : 'Costo por nuevo (cargá la inversión)')}
       </div>
-      <p class="hint" style="margin-bottom:6px;">${dif > 0 ? `Por encima del promedio de los 30 días previos (+${dif.toLocaleString('es-AR', { maximumFractionDigits: 2 })} por día).` : 'No supera el promedio diario de los 30 días previos.'}${m.conFichaSinFechaClara ? ` · ${m.conFichaSinFechaClara} persona(s) sin turnos previos pero con ficha cuya antigüedad no se puede confirmar (no se cuentan ni como nuevas ni como recurrentes: decidí vos).` : ''}</p>
-      ${dudosos}${avisos}
+      <p class="hint" style="margin-bottom:12px;">${dif > 0 ? `Por encima del promedio de los 30 días previos (+${dif.toLocaleString('es-AR', { maximumFractionDigits: 2 })} por día).` : 'No supera el promedio diario de los 30 días previos.'}${m.conFichaSinFechaClara ? ` · ${m.conFichaSinFechaClara} persona(s) con ficha cuya antigüedad no se puede confirmar (ni nuevas ni recurrentes hasta que decidas).` : ''}</p>
+      <h3 style="font-size:14px;margin:6px 0;">Turnos creados por motivo</h3>
+      ${htmlTablaMotivos(m)}
+      ${casos}${avisos}
       <details class="camp-nombres" style="margin-top:10px;"><summary>Ver nombres</summary><div class="camp-nombres-cuerpo hint">Cargando...</div></details>
       ${abierta ? `<div class="field-row" style="margin-top:12px;"><div class="field" style="max-width:200px;"><label>Fecha de cierre</label><input type="date" class="camp-fin" value="${hoyArYmd()}"></div></div><button class="btn btn-outline camp-finalizar">Finalizar campaña</button>` : ''}
     </div>`;
@@ -719,9 +761,21 @@
     try {
       const r = await apiGet('campanas');
       const lista = (r.campanas || []).slice().reverse();
-      cont.innerHTML = lista.length ? lista.map(htmlCampana).join('') : '<p class="hint">Todavía no hay campañas.</p>';
-      if (r.error) cont.insertAdjacentHTML('afterbegin', `<p class="hint">⚠️ ${escapeHtmlAdmin(r.error)}</p>`);
+      const activas = lista.filter((c) => !c.archivada);
+      const archivadas = lista.filter((c) => c.archivada);
+      cont.innerHTML = (activas.length ? activas.map(htmlCampana).join('') : '<p class="hint">Todavía no hay campañas.</p>')
+        + (archivadas.length ? `<details class="camp-archivadas" style="margin-top:10px;"><summary>Campañas archivadas (${archivadas.length})</summary>${archivadas.map(htmlCampana).join('')}</details>` : '');
+      if (r.error) cont.insertAdjacentHTML('afterbegin', `<p class="hint">⚠️ ${esc(r.error)}</p>`);
     } catch { cont.innerHTML = '<p class="hint">No se pudieron cargar las campañas.</p>'; }
+  }
+  // Refresca solo una campaña (después de decidir un caso) sin perder el lugar en la pantalla.
+  async function refrescarCampana(id, { abrirCasos = false } = {}) {
+    const card = document.querySelector(`#camp-lista [data-camp="${id}"]`);
+    const r = await apiGet('campanas', { id });
+    const c = r.campanas?.[0];
+    if (!card || !c) return cargarCampanas();
+    card.outerHTML = htmlCampana(c);
+    if (abrirCasos) { const nueva = document.querySelector(`#camp-lista [data-camp="${id}"] .camp-casos`); if (nueva) nueva.open = true; }
   }
   document.getElementById('camp-iniciar').addEventListener('click', async () => {
     const nombre = document.getElementById('camp-nombre').value.trim();
@@ -732,37 +786,118 @@
       const r = await apiPost('campanas', { accion: 'iniciar', nombre, inicio: document.getElementById('camp-inicio').value, inversion: document.getElementById('camp-inversion').value });
       if (!r.success) return setMsg('camp-msg', r.error || 'No se pudo iniciar.', 'error');
       document.getElementById('camp-nombre').value = ''; document.getElementById('camp-inversion').value = '';
-      setMsg('camp-msg', 'Campaña iniciada ✓', 'ok');
+      setMsg('camp-msg', 'Campaña iniciada ✓ (más inversiones: botón Editar)', 'ok');
       await cargarCampanas();
     } catch { setMsg('camp-msg', 'No se pudo iniciar. Revisá tu conexión.', 'error'); }
     finally { btn.disabled = false; }
   });
+  async function descargarResumenCampana(id, formato, btn) {
+    btn.disabled = true; setMsg('camp-msg', 'Generando resumen…', '');
+    try {
+      const r = await fetch(`/api/gestion/admin?recurso=export-campana&id=${encodeURIComponent(id)}&formato=${formato}&key=${encodeURIComponent(adminKey)}`);
+      if (r.status === 401) { onUnauthorized(); return; }
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `Error ${r.status}`); }
+      const blob = await r.blob();
+      const nombre = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || `resumen.${formato}`;
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = href; a.download = nombre;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 60000);
+      setMsg('camp-msg', `Listo: ${nombre} (sin nombres de pacientes)`, 'ok');
+    } catch (err) { setMsg('camp-msg', `No se pudo generar: ${err.message}`, 'error'); }
+    finally { btn.disabled = false; }
+  }
   document.getElementById('camp-lista').addEventListener('click', async (e) => {
     const card = e.target.closest('[data-camp]');
     if (!card) return;
-    if (e.target.classList.contains('camp-finalizar')) {
-      e.target.disabled = true;
+    const id = card.dataset.camp;
+    const t = e.target;
+    const panel = card.querySelector('.camp-editar');
+    if (t.classList.contains('camp-finalizar')) {
+      t.disabled = true;
       try {
-        const r = await apiPost('campanas', { accion: 'finalizar', id: card.dataset.camp, fin: card.querySelector('.camp-fin').value });
-        if (!r.success) { setMsg('camp-msg', r.error || 'No se pudo finalizar.', 'error'); e.target.disabled = false; return; }
+        const r = await apiPost('campanas', { accion: 'finalizar', id, fin: card.querySelector('.camp-fin').value });
+        if (!r.success) { setMsg('camp-msg', r.error || 'No se pudo finalizar.', 'error'); t.disabled = false; return; }
         setMsg('camp-msg', 'Campaña finalizada ✓', 'ok');
         await cargarCampanas();
-      } catch { setMsg('camp-msg', 'No se pudo finalizar.', 'error'); e.target.disabled = false; }
+      } catch { setMsg('camp-msg', 'No se pudo finalizar.', 'error'); t.disabled = false; }
+    } else if (t.classList.contains('camp-editar-btn')) {
+      panel.classList.toggle('hidden');
+    } else if (t.classList.contains('ce-cancelar')) {
+      panel.classList.add('hidden');
+    } else if (t.classList.contains('ce-inv-agregar')) {
+      card.querySelector('.ce-inv').insertAdjacentHTML('beforeend', filaInversionHtml());
+    } else if (t.classList.contains('ce-inv-quitar')) {
+      t.closest('.ce-inv-row').remove();
+    } else if (t.classList.contains('ce-guardar')) {
+      const msg = card.querySelector('.ce-msg');
+      const inversiones = [...card.querySelectorAll('.ce-inv-row')].map((f) => ({ concepto: f.querySelector('.ce-inv-concepto').value, monto: f.querySelector('.ce-inv-monto').value }));
+      t.disabled = true; msg.className = 'msg ce-msg'; msg.textContent = 'Guardando...';
+      try {
+        const r = await apiPost('campanas', { accion: 'editar', id, nombre: card.querySelector('.ce-nombre').value, inicio: card.querySelector('.ce-inicio').value, fin: card.querySelector('.ce-fin').value, inversiones });
+        if (!r.success) { msg.className = 'msg ce-msg error'; msg.textContent = r.error || 'No se pudo guardar.'; t.disabled = false; return; }
+        setMsg('camp-msg', 'Cambios guardados ✓', 'ok');
+        await cargarCampanas();
+      } catch { msg.className = 'msg ce-msg error'; msg.textContent = 'No se pudo guardar. Revisá tu conexión.'; t.disabled = false; }
+    } else if (t.classList.contains('camp-archivar')) {
+      const archivar = t.textContent.includes('Archivar');
+      t.disabled = true;
+      try { await apiPost('campanas', { accion: 'archivar', id, archivada: archivar }); await cargarCampanas(); setMsg('camp-msg', archivar ? 'Campaña archivada ✓' : 'Campaña desarchivada ✓', 'ok'); }
+      catch { setMsg('camp-msg', 'No se pudo cambiar.', 'error'); t.disabled = false; }
+    } else if (t.classList.contains('camp-eliminar')) {
+      const nombre = card.querySelector('h2')?.firstChild?.textContent?.trim() || 'esta campaña';
+      if (!window.confirm(`¿Eliminar "${nombre}" para siempre? Esto no se puede deshacer (si solo querés sacarla de la vista, usá Archivar).`)) return;
+      t.disabled = true;
+      try { await apiPost('campanas', { accion: 'eliminar', id }); setMsg('camp-msg', 'Campaña eliminada.', 'ok'); await cargarCampanas(); }
+      catch { setMsg('camp-msg', 'No se pudo eliminar.', 'error'); t.disabled = false; }
+    } else if (t.classList.contains('camp-export')) {
+      descargarResumenCampana(id, t.dataset.formato, t);
     }
   });
-  // Los nombres se piden recién al abrir el desplegable (nunca viajan con la carga normal).
+  // Decidir un caso: guarda y recalcula los totales de esa campaña.
+  document.getElementById('camp-lista').addEventListener('change', async (e) => {
+    const sel = e.target;
+    if (!sel.classList?.contains('camp-decidir')) return;
+    const card = sel.closest('[data-camp]');
+    sel.disabled = true;
+    try {
+      const r = await apiPost('campanas', { accion: 'decidir', clave: sel.dataset.clave, decision: sel.value });
+      if (!r.success) { setMsg('camp-msg', r.error || 'No se pudo guardar la decisión.', 'error'); sel.disabled = false; return; }
+      await refrescarCampana(card.dataset.camp, { abrirCasos: true });
+    } catch { setMsg('camp-msg', 'No se pudo guardar la decisión.', 'error'); sel.disabled = false; }
+  });
+  const opcionesDecision = (actual) => [['', '— decidir —'], ['nuevo', 'Es nuevo'], ['recurrente', 'Es recurrente'], ['descartar', 'Descartar']]
+    .map(([v, t]) => `<option value="${v}"${v === actual ? ' selected' : ''}>${t}</option>`).join('');
+  const filaCaso = (x, detalleTxt, actual) => `<li style="margin-bottom:8px;list-style:none;">
+    <strong>${esc(x.nombre || 'Sin nombre')}</strong> <span class="hint">· ${esc(detalleTxt)} · ${esc(x.identificadorParcial)} · ${x.turnos} turno(s)</span><br>
+    <select class="camp-decidir" data-clave="${esc(x.clave)}" style="margin-top:4px;padding:5px 8px;border-radius:8px;border:1.5px solid var(--line);">${opcionesDecision(actual)}</select></li>`;
+  // Nombres y casos para resolver se piden recién al abrir el desplegable (nunca viajan con la carga normal).
   document.getElementById('camp-lista').addEventListener('toggle', async (e) => {
     const det = e.target;
-    if (!det.classList?.contains('camp-nombres') || !det.open || det.dataset.cargado) return;
+    if (!det.open || det.dataset.cargado) return;
+    const esNombres = det.classList?.contains('camp-nombres');
+    const esCasos = det.classList?.contains('camp-casos');
+    if (!esNombres && !esCasos) return;
     const card = det.closest('[data-camp]');
-    const cuerpo = det.querySelector('.camp-nombres-cuerpo');
+    const cuerpo = det.querySelector(esNombres ? '.camp-nombres-cuerpo' : '.camp-casos-cuerpo');
     try {
       const r = await apiGet('campanas', { id: card.dataset.camp, detalle: '1' });
-      const n = r.campanas?.[0]?.metricas?.nombres || { nuevas: [], recurrentes: [] };
-      const lista = (arr) => (arr.length ? arr.map((x) => escapeHtmlAdmin(x)).join(', ') : '—');
-      cuerpo.innerHTML = `<strong>Nuevas:</strong> ${lista(n.nuevas)}<br><strong>Recurrentes:</strong> ${lista(n.recurrentes)}`;
+      const m = r.campanas?.[0]?.metricas;
+      if (!m) { cuerpo.textContent = 'No se pudieron cargar.'; return; }
+      if (esNombres) {
+        const n = m.nombres || { nuevas: [], recurrentes: [] };
+        const lista = (arr) => (arr.length ? arr.map((x) => esc(x)).join(', ') : '—');
+        const otros = (m.otrosMotivos || []).length ? `<br><strong>Qué hay en "Otros" (motivos escritos a mano):</strong> ${m.otrosMotivos.map((o) => `${esc(o.texto)} (${o.cantidad})`).join(', ')}` : '';
+        cuerpo.innerHTML = `<strong>Nuevas:</strong> ${lista(n.nuevas)}<br><strong>Recurrentes:</strong> ${lista(n.recurrentes)}${otros}`;
+      } else {
+        const pend = [...(m.dudosos || []).map((x) => filaCaso(x, x.motivo, '')), ...(m.conFicha || []).map((x) => filaCaso(x, 'Con ficha, antigüedad no confirmable', ''))];
+        const res = (m.resueltos || []).map((x) => filaCaso(x, `${x.de}`, x.decision));
+        cuerpo.innerHTML = `<p class="hint" style="margin-bottom:8px;">Los dudosos no se cuentan hasta que decidas. "Descartar" los saca de todos los totales; tu decisión se guarda y vale para esa persona en cualquier campaña.</p>
+          <h3 style="font-size:13px;margin:8px 0;">Sin resolver (${pend.length})</h3><ul style="margin:0;padding:0;">${pend.join('') || '<li class="hint" style="list-style:none;">Ninguno 🎉</li>'}</ul>
+          ${res.length ? `<h3 style="font-size:13px;margin:12px 0 8px;">Resueltos a mano (${res.length}) — podés cambiar la decisión</h3><ul style="margin:0;padding:0;">${res.join('')}</ul>` : ''}`;
+      }
       det.dataset.cargado = '1';
-    } catch { cuerpo.textContent = 'No se pudieron cargar los nombres.'; }
+    } catch { cuerpo.textContent = 'No se pudieron cargar.'; }
   }, true);
 
   // ---------- Dashboard ----------

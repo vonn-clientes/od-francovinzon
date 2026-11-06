@@ -1,5 +1,10 @@
 # Pendientes activos
 
+**2026-11-06 — CAMPAÑAS v2 (rama `campanas-v2`, NO publicada a main — falta tu OK)**: edición completa de campañas, varias inversiones, desglose por motivo, selector para resolver casos dudosos y exportación CSV/PDF sin nombres. Código y tests listos (33 tests de campañas en verde; la pantalla se probó con jsdom). Pendiente:
+1. ⏳ Probar en el preview de la rama (editar una campaña ya finalizada, cargar 2 inversiones y mirar el costo por paciente nuevo, abrir "casos sin resolver", exportar CSV/PDF) y recién ahí publicar a `main` (regla permanente).
+2. ⏳ Revisar la tabla "Turnos por motivo" con datos reales: si mucho cae en "Otros", abrir el desplegable de nombres (muestra qué hay en "Otros") y ajustar las categorías (`categorizarMotivo()` en `lib/campanasAnalisis.js`) o cargar los tratamientos que falten en "Listas desplegables".
+3. Mejora pendiente: columna `creado_en` en `consultorio.turnos` para no depender del registro de actividad (tope de 1.000 entradas del RPC).
+
 **2026-11-06 — CAMPAÑAS en /admin (rama `campanas-fase1`, NO publicada a main — falta tu OK)**. Código y tests listos (16 tests nuevos en verde, 82 en total sin romper nada). Pendiente:
 1. ⏳ **Fase 1 — el número real** (personas nuevas con turno creado entre el 1/11 00:00 y el 5/11 23:59, hora Argentina): se obtiene abriendo en el preview de la rama `/api/gestion/admin?recurso=campana-analisis&desde=2026-11-01&hasta=2026-11-05&key=<ADMIN_KEY>` (el preview de Vercel está protegido: hay que abrirlo con la sesión de Vercel de Fausto). La agenda en Supabase no guarda la fecha de creación del turno: el conteo sale del registro de actividad (límite pedido: 20.000 entradas; si el RPC devuelve menos, el panel avisa en `noDeterminable` desde qué fecha llega). Mejora pendiente: agregar una columna `creado_en timestamptz default now()` a `consultorio.turnos` para no depender del registro.
 2. ⏳ Probar la sección **Campañas** en el preview (iniciar, ver métricas, finalizar) y recién ahí publicar a `main` (regla permanente: rama + preview, nunca push directo).

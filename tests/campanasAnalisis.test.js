@@ -225,7 +225,8 @@ test('categorías de motivo: alineadores, lista de tratamientos, consulta, otros
   assert.equal(categorizarMotivo('Limpieza', trat), 'Limpieza dental');
   assert.equal(categorizarMotivo('Control de ortodoncia', trat), 'Ortodoncia');
   assert.equal(categorizarMotivo('Primera consulta', trat), 'Consulta');
-  assert.equal(categorizarMotivo('me duele una muela', trat), 'Otros');
+  assert.equal(categorizarMotivo('me duele una muela', trat), 'Urgencias');
+  assert.equal(categorizarMotivo('quiero saber cuanto sale', trat), 'Otros');
 });
 
 test('desglose por motivo separa nuevos y recurrentes y trae solo cantidades', () => {
@@ -272,4 +273,21 @@ test('resumen exportable: totales, inversiones, motivos y ningún nombre', () =>
   assert.ok(filas.some((f) => f[0] === 'Consulta' && f[1] === 1 && f[2] === 1));
   assert.ok(filas.every((f) => f.length === 4));
   assert.equal(texto.includes('Secreta'), false);
+});
+
+test('jerga del consultorio: arreglo, ajuste de ortodoncia (con error de tipeo), conducto/TC, rotura, sellar', () => {
+  const trat = ['Escaneo 3D', 'Ortodoncia', 'Endodoncia mecanizada', 'Urgencias', 'Limpieza dental'];
+  assert.equal(categorizarMotivo('Arreglo', trat), 'Arreglos / restauraciones');
+  assert.equal(categorizarMotivo('arreglos', trat), 'Arreglos / restauraciones');
+  assert.equal(categorizarMotivo('Ajuste de ortdoncia', trat), 'Ortodoncia');
+  assert.equal(categorizarMotivo('Control de brackets', trat), 'Ortodoncia');
+  assert.equal(categorizarMotivo('Tratamiento de conducto', trat), 'Endodoncia mecanizada'); // usa el nombre de la lista
+  assert.equal(categorizarMotivo('TC', trat), 'Endodoncia mecanizada');
+  assert.equal(categorizarMotivo('TC', []), 'Endodoncia'); // sin lista, nombre por defecto
+  assert.equal(categorizarMotivo('Se le rompio muela', trat), 'Urgencias');
+  assert.equal(categorizarMotivo('Sellar', trat), 'Selladores');
+  assert.equal(categorizarMotivo('Alineadores', trat), 'Alineadores');
+  // lo ambiguo no se adivina
+  assert.equal(categorizarMotivo('Ajuste', trat), 'Otros');
+  assert.equal(categorizarMotivo('Armado', trat), 'Otros');
 });

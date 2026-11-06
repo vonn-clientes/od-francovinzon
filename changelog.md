@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-11-06 — Campañas: el agrupado por motivo entiende la jerga del consultorio (rama `campanas-motivos`, sin publicar)
+- Con datos reales, 23 de 56 turnos caían en "Otros": `categorizarMotivo()` ahora reconoce "arreglo(s)" → *Arreglos / restauraciones*, "ajuste de ortdoncia" (con el error de tipeo) y "brackets" → *Ortodoncia*, "conducto"/"TC" → *Endodoncia* (usa el nombre del ítem de "Listas desplegables" si existe), "se le rompió muela"/dolor → *Urgencias*, "sellar" → *Selladores*. Lo ambiguo ("Ajuste", "Armado" sueltos) sigue en *Otros*: no se adivina.
+
 ## 2026-11-06 — Campañas v2: edición, varias inversiones, motivos, casos resueltos a mano y resumen exportable (rama `campanas-v2`, sin publicar)
 - **Edición** (`recurso=campanas`, `accion=editar`): nombre, fecha de inicio y de cierre (también en campañas ya finalizadas; cierre vacío = reabrirla) e inversiones. **Archivar/desarchivar** (sale de la vista, se conserva en "Campañas archivadas") y **eliminar** (con confirmación). Las campañas viejas con un solo número `inversion` se leen como una inversión y se normalizan al editarlas.
 - **Varias inversiones por campaña** (`inversiones: [{concepto, monto}]`, ej. "Búsqueda $42.972" + "Display $49.924"): se suman y el **costo por paciente nuevo usa el total** (pauta real). Montos en formato argentino (`50.000`, `49.924,50`).

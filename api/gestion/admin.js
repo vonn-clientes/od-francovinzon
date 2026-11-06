@@ -32,7 +32,9 @@ import { construirPerfil, perfilACsv } from '../../lib/perfilPacientes.js';
 import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesCompleto.js';
 import { escrituraPrimariaActiva } from '../../lib/escrituraPrimaria.js';
 import { leerFichaSupabase, leerMovimientosSupabase } from '../../lib/fichaDesdeSupabase.js';
-import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
+import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc, leerAgendaRpc, turnosDeLectura } from '../../lib/agendaSupabase.js';
+import { analizarPeriodo, metricasCampana, hoyAR, parseFechaFlexible } from '../../lib/campanasAnalisis.js';
+import { randomBytes } from 'node:crypto';
 
 // Config de solo-lectura que también necesita /pacientes y /gestion (listas
 // desplegables, radios, plantilla de WhatsApp) — no son datos sensibles, así que
@@ -104,12 +106,14 @@ export default async function handler(req, res) {
       if (recurso === 'sin-ficha') return await conError(getSinFicha, req, res);
       if (recurso === 'seguimiento') return await conError(getSeguimiento, req, res);
       if (recurso === 'campana-analisis') return await getCampanaAnalisis(req, res);
+      if (recurso === 'campanas') return await conError(getCampanas, req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
     if (req.method === 'POST') {
       if (recurso === 'horarios') return await postHorarios(req, res);
       if (recurso === 'reserva-online') return await postReservaOnline(req, res);
+      if (recurso === 'campanas') return await conError(postCampanas, req, res);
       if (recurso === 'textos') return await postTextos(req, res);
       if (recurso === 'listas') return await postListas(req, res);
       if (recurso === 'radios') return await postRadios(req, res);
@@ -128,99 +132,145 @@ export default async function handler(req, res) {
   }
 }
 
-// Análisis de solo lectura. Calendar es la fuente de creación cuando sigue siendo
-// la agenda primaria; la agenda Supabase actual no expone created_at en su RPC.
-async function getCampanaAnalisis(req, res) {
-  const { desde, hasta } = req.query || {};
-  const detalle = req.query?.detalle === '1';
-  const fechaValida = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00-03:00`));
-  if (!fechaValida(desde) || !fechaValida(hasta) || desde > hasta) return res.status(400).json({ success: false, error: 'desde y hasta deben ser fechas YYYY-MM-DD válidas.' });
-  const salida = { turnosCreados: 0, personasDistintas: 0, nuevas: 0, recurrentes: 0, dudosos: [], noDeterminable: [] };
-  // No usar el espejo de Calendar para fechar eventos si la escritura primaria ya migró.
+// ---------- Campañas (solo lectura sobre turnos + totales por campaña) ----------
+// Cuenta PERSONAS NUEVAS por la fecha de CREACIÓN del turno (ver lib/campanasAnalisis.js).
+// Nada de datos de pacientes en logs: las respuestas llevan solo totales; los nombres salen
+// únicamente con ?detalle=1 y los casos dudosos se identifican por los últimos 2 dígitos.
+const LECTURA_ATRAS_MS = 2 * 365 * 24 * 60 * 60 * 1000; // historial para saber si alguien ya había sacado turno
+const LECTURA_ADELANTE_MS = 400 * 24 * 60 * 60 * 1000; // el turno puede ser para meses después de haberlo creado
+const CAMPOS_CREACION_AGENDA = ['created_at', 'creado_en', 'creado', 'calendar_created', 'fecha_creacion', 'inserted_at'];
+
+async function leerRegistrosAgenda() {
+  const ahora = Date.now();
+  const desdeLectura = new Date(ahora - LECTURA_ATRAS_MS).toISOString();
+  const hastaLectura = new Date(ahora + LECTURA_ADELANTE_MS).toISOString();
+  const digitos = (s) => String(s || '').replace(/\D/g, '');
+
   if (agendaPrimariaActiva()) {
-    salida.noDeterminable.push({ motivo: 'La agenda primaria Supabase no expone la fecha de creación; Calendar puede ser un espejo atrasado.' });
-    return res.status(200).json(salida);
+    const datos = await leerAgendaRpc('consultorio_agenda_listar', { p_desde: desdeLectura, p_hasta: hastaLectura }, { timeoutMs: 20000 });
+    if (!datos) return { error: 'No se pudo leer la agenda en Supabase.' };
+    const filas = turnosDeLectura(datos);
+    const campo = CAMPOS_CREACION_AGENDA.find((k) => filas.some((f) => f && f[k]));
+    const notas = [{ motivo: 'La lectura de la agenda no incluye turnos cancelados: quien sacó turno y lo canceló no se cuenta.' }];
+    if (!campo) {
+      return { registros: [], noDeterminable: [...notas, {
+        motivo: 'La agenda en Supabase no trae ninguna columna con la fecha de creación del turno.',
+        columnasDisponibles: Object.keys(filas[0] || {}),
+      }] };
+    }
+    const registros = filas
+      .filter((t) => t && t.tipo !== 'bloqueo' && String(t.paciente_nombre || '').trim())
+      .map((t) => ({
+        dni: digitos(t.dni), telefono: digitos(t.telefono), nombre: String(t.paciente_nombre).trim(),
+        creado: Date.parse(t[campo]), inicio: Date.parse(t.inicio),
+      }));
+    return { registros, noDeterminable: notas };
   }
-  const parseStart = new Date(`${desde}T00:00:00-03:00`);
-  const upper = new Date(`${hasta}T23:59:59.999-03:00`);
-  // Ventana histórica acotada deliberadamente para respetar cuota y duración.
-  const historyStart = new Date(parseStart.getTime() - 2 * 365 * 24 * 60 * 60 * 1000);
+
   let calendar;
-  try { calendar = getCalendarClient(); } catch { return res.status(503).json({ success: false, error: 'No se pudo leer la agenda.' }); }
-  const events = [];
+  try { calendar = getCalendarClient(); } catch { return { error: 'No se pudo leer la agenda.' }; }
+  const registros = [];
   try {
     for (const calendarId of [CALENDAR_ID, SOBRETURNOS_CALENDAR_ID]) {
       let pageToken;
       do {
         const { data } = await conReintentos(() => calendar.events.list({
-          // timeMax por fecha del TURNO, no de creación: hay que mirar hacia adelante, porque quien
-          // sacó turno en el rango suele haberlo sacado para días posteriores al rango.
-          calendarId, timeMin: historyStart.toISOString(), timeMax: new Date(upper.getTime() + 400 * 24 * 60 * 60 * 1000).toISOString(), singleEvents: true,
-          showDeleted: true, maxResults: 2500, pageToken,
-          fields: 'nextPageToken,items(id,summary,description,status,created,start,end)',
+          calendarId, timeMin: desdeLectura, timeMax: hastaLectura, singleEvents: true, showDeleted: false,
+          maxResults: 2500, pageToken, fields: 'nextPageToken,items(id,summary,description,status,created,start)',
         }));
-        events.push(...(data.items || []).map((e) => ({ ...e, __calendarId: calendarId })));
+        for (const e of data.items || []) {
+          const nombre = String(e.summary || '').trim();
+          if (e.status === 'cancelled' || !nombre || String(e.description || '').includes(BLOCK_MARKER)) continue;
+          registros.push({
+            dni: digitos(extraerDni(e.description)), telefono: digitos(extraerTelefono(e.description)), nombre,
+            creado: Date.parse(e.created), inicio: Date.parse(e.start?.dateTime || e.start?.date),
+          });
+        }
         pageToken = data.nextPageToken;
       } while (pageToken);
     }
   } catch {
-    return res.status(503).json({ success: false, error: 'No se pudo completar la lectura paginada de la agenda.' });
+    return { error: 'No se pudo completar la lectura paginada de la agenda.' };
   }
+  return { registros, noDeterminable: [{ motivo: 'La lectura de la agenda no incluye turnos cancelados: quien sacó turno y lo canceló no se cuenta.' }] };
+}
+
+async function cargarBaseCampanas() {
+  const agenda = await leerRegistrosAgenda();
+  if (agenda.error) return agenda;
   const cons = await listarPacientesConsolidados({ cache: true, fallbackGoogle: !escrituraPrimariaActiva(process.env) }).catch(() => null);
-  if (!Array.isArray(cons)) {
-    salida.noDeterminable.push({ motivo: 'No se pudo leer el padrón consolidado para cotejar pacientes.' });
-    return res.status(200).json(salida);
+  const noDeterminable = [...(agenda.noDeterminable || [])];
+  let padron = [];
+  if (Array.isArray(cons)) {
+    padron = cons.map((p) => ({ dni: p.dni, telefono: p.telefono, nombre: `${p.nombre || ''} ${p.apellido || ''}`.trim(), ficha: !!p.fichaId, ultimaVisita: parseFechaFlexible(p.ultimaVisita) }));
+  } else {
+    noDeterminable.push({ motivo: 'No se pudo leer el padrón de pacientes: no se puede distinguir quién ya tenía ficha.' });
   }
-  const normalizar = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const digits = (s) => String(s || '').replace(/\D/g, '');
-  const esDniPrueba = (d) => !d || d.length < 7 || /^(\d)\1+$/.test(d) || /^(12345678|123456789|22222222|11111111|12312312)$/.test(d);
-  const registros = [];
-  for (const e of events) {
-    if (e.status === 'cancelled') continue;
-    const dni = digits(extraerDni(e.description));
-    const telefono = digits(extraerTelefono(e.description));
-    const title = String(e.summary || '').trim();
-    const esTurno = !String(e.description || '').includes(BLOCK_MARKER) && !!title;
-    if (!esTurno) continue;
-    if (!e.created || Number.isNaN(Date.parse(e.created))) {
-      if (!salida.noDeterminable.some((x) => x.motivo === 'Hay eventos sin fecha de creación disponible.')) salida.noDeterminable.push({ motivo: 'Hay eventos sin fecha de creación disponible.' });
-      continue;
-    }
-    const creado = Date.parse(e.created);
-    registros.push({ dni, telefono, nombre: title, key: dni && !esDniPrueba(dni) ? `d:${dni}` : (telefono ? `t:${telefono}|${normalizar(title)}` : ''), creado, target: creado >= parseStart.getTime() && creado <= upper.getTime() });
-  }
-  const candidatas = registros.filter((r) => r.target);
-  const telDnis = new Map(), dniNames = new Map();
-  for (const r of registros) {
-    if (r.telefono && r.dni && !esDniPrueba(r.dni)) { const set = telDnis.get(r.telefono) || new Set(); set.add(r.dni); telDnis.set(r.telefono, set); }
-    if (r.dni && !esDniPrueba(r.dni)) { const set = dniNames.get(r.dni) || new Set(); set.add(normalizar(r.nombre)); dniNames.set(r.dni, set); }
-  }
-  const fichas = cons.filter((p) => p.fichaId);
-  const historial = [...registros.filter((r) => r.creado < parseStart.getTime()), ...cons.map((p) => ({ dni: digits(p.dni), telefono: digits(p.telefono), nombre: `${p.nombre || ''} ${p.apellido || ''}`, ficha: !!p.fichaId }))];
-  // Misma regla estricta que el cruce turno↔ficha (lib/identidadTurno.js): DNI idéntico, o sin DNI
-  // y mismo nombre completo + mismo teléfono. El teléfono solo nunca alcanza (hijos con el teléfono de los padres).
-  const personaPrev = (r) => historial.some((p) => mismaPersonaEstricta(
-    { dni: esDniPrueba(r.dni) ? '' : r.dni, telefono: r.telefono, nombre: r.nombre },
-    { dni: esDniPrueba(digits(p.dni)) ? '' : p.dni, telefono: p.telefono, nombre: p.nombre },
-  ));
-  const seen = new Set();
-  for (const r of candidatas) {
-    const dnisTel = r.telefono ? telDnis.get(r.telefono) : null;
-    const similarDni = r.dni && !esDniPrueba(r.dni) && [...dniNames.entries()].some(([d, ns]) => d !== r.dni && [...ns].some((n) => n && (n.includes(normalizar(r.nombre)) || normalizar(r.nombre).includes(n))));
-    const motivos = [];
-    if (r.dni && esDniPrueba(r.dni)) motivos.push('DNI de prueba o inválido');
-    if (dnisTel?.size > 1) motivos.push('Mismo teléfono asociado a DNI distintos');
-    if (similarDni) motivos.push('Nombre coincidente con DNI distinto');
-    if (!r.dni && !r.telefono) motivos.push('Evento sin DNI ni teléfono');
-    const k = r.key || `n:${normalizar(r.nombre)}`;
-    if (motivos.length) {
-      salida.dudosos.push({ motivo: motivos.join('; '), identificadorParcial: r.dni ? `DNI ••${r.dni.slice(-2)}` : (r.telefono ? `tel. ••${r.telefono.slice(-2)}` : 'sin identificador'), ...(detalle ? { nombre: r.nombre } : {}) });
-      continue;
-    }
-    salida.turnosCreados += 1;
-    if (!seen.has(k)) { seen.add(k); salida.personasDistintas += 1; if (personaPrev(r)) salida.recurrentes += 1; else salida.nuevas += 1; }
-  }
+  return { registros: agenda.registros, padron, noDeterminable };
+}
+
+const esFechaYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00-03:00`));
+
+async function getCampanaAnalisis(req, res) {
+  const { desde, hasta } = req.query || {};
+  if (!esFechaYmd(desde) || !esFechaYmd(hasta) || desde > hasta) return res.status(400).json({ success: false, error: 'desde y hasta deben ser fechas YYYY-MM-DD válidas.' });
+  const base = await cargarBaseCampanas();
+  if (base.error) return res.status(503).json({ success: false, error: base.error });
+  const salida = analizarPeriodo({ registros: base.registros, padron: base.padron, desde, hasta, detalle: req.query?.detalle === '1' });
+  salida.noDeterminable.push(...base.noDeterminable);
   return res.status(200).json(salida);
+}
+
+async function getCampanas(req, res) {
+  const campanas = await getConfig('campanas', []);
+  const lista = Array.isArray(campanas) ? campanas : [];
+  const idPedido = req.query?.id;
+  const detalle = req.query?.detalle === '1' && !!idPedido;
+  const aMostrar = idPedido ? lista.filter((c) => c.id === idPedido) : lista;
+  if (!aMostrar.length) return res.status(200).json({ campanas: [] });
+  const base = await cargarBaseCampanas();
+  if (base.error) return res.status(200).json({ campanas: aMostrar.map((c) => ({ ...c, metricas: null })), error: base.error });
+  const hoy = hoyAR();
+  const salida = aMostrar.map((c) => {
+    const metricas = metricasCampana({ campana: c, registros: base.registros, padron: base.padron, hoy, detalle });
+    metricas.noDeterminable.push(...base.noDeterminable);
+    return { ...c, metricas };
+  });
+  return res.status(200).json({ campanas: salida });
+}
+
+async function postCampanas(req, res) {
+  const { accion } = req.body || {};
+  const lista = await getConfig('campanas', []);
+  const campanas = Array.isArray(lista) ? lista : [];
+  const hoy = hoyAR();
+  if (accion === 'iniciar') {
+    const nombre = String(req.body.nombre || '').trim().slice(0, 80);
+    const inicio = req.body.inicio ? String(req.body.inicio) : hoy;
+    // Pesos en formato argentino: "50.000" = cincuenta mil, "50.000,50" con coma decimal. Si ya viene
+    // un número (no texto), se usa tal cual.
+    const crudo = req.body.inversion;
+    const inversionTexto = typeof crudo === 'number' ? String(crudo) : String(crudo ?? '').replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '');
+    const inversion = inversionTexto === '' ? null : Number(inversionTexto);
+    if (!nombre) return res.status(400).json({ success: false, error: 'Falta el nombre de la campaña.' });
+    if (!esFechaYmd(inicio)) return res.status(400).json({ success: false, error: 'La fecha de inicio no es válida.' });
+    if (inversion !== null && !(inversion >= 0)) return res.status(400).json({ success: false, error: 'La inversión no es válida.' });
+    const campana = { id: randomBytes(4).toString('hex'), nombre, inicio, fin: null, inversion };
+    await setConfig('campanas', [...campanas, campana]);
+    await logActividad({ tipo: 'campana_iniciada', detalle: nombre, actor: 'admin' });
+    return res.status(200).json({ success: true, campana });
+  }
+  if (accion === 'finalizar') {
+    const c = campanas.find((x) => x.id === req.body.id);
+    if (!c) return res.status(404).json({ success: false, error: 'No existe esa campaña.' });
+    if (c.fin) return res.status(400).json({ success: false, error: 'La campaña ya estaba finalizada.' });
+    const fin = req.body.fin ? String(req.body.fin) : hoy;
+    if (!esFechaYmd(fin) || fin < c.inicio) return res.status(400).json({ success: false, error: 'La fecha de cierre no es válida.' });
+    await setConfig('campanas', campanas.map((x) => (x.id === c.id ? { ...x, fin } : x)));
+    await logActividad({ tipo: 'campana_finalizada', detalle: c.nombre, actor: 'admin' });
+    return res.status(200).json({ success: true });
+  }
+  return res.status(400).json({ success: false, error: 'acción inválida' });
 }
 
 // ---------- 1. Horarios y agenda ----------

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-06 — Campañas en /admin: conteo de personas nuevas por fecha de creación del turno (rama `campanas-fase1`, sin publicar)
+- Sección **Campañas** en `/admin` (`recurso=campanas`, GET/POST con `ADMIN_KEY`): "Iniciar campaña" (nombre, fecha de inicio por defecto hoy, inversión opcional en pesos) y "Finalizar campaña". Se guardan con `getConfig/setConfig` (clave `campanas`; Supabase, o la hoja de config si no está sellada): sin servicios nuevos ni costos.
+- Por campaña: turnos creados, personas distintas, nuevas vs. recurrentes, nuevas por día vs. los 30 días previos al inicio y costo por paciente nuevo (si se cargó la inversión). Por defecto solo totales; los nombres salen recién al abrir el desplegable (`?detalle=1`). Nada de datos de pacientes en logs ni en el repo.
+- `recurso=campana-analisis&desde=YYYY-MM-DD&hasta=YYYY-MM-DD` (solo lectura) para consultar cualquier rango, p. ej. el 1/11–5/11.
+- `lib/campanasAnalisis.js` (lógica pura, probada con datos inventados en `tests/campanasAnalisis.test.js` y `tests/campanasHandler.test.js`): se cuenta por fecha de **creación** del turno, no la del turno; hora Argentina UTC-3 con `Intl`. Identidad con la regla estricta de `lib/identidadTurno.js` (DNI idéntico, o sin DNI mismo nombre + teléfono; el teléfono solo nunca alcanza). Los dudosos (DNI de prueba como 22222222, mismo teléfono con DNI distintos, mismo nombre con DNI distinto, turno sin DNI ni teléfono) **no se cuentan**: van en una lista aparte.
+- Una **ficha no prueba que la persona ya era paciente** (puede crearse en el primer turno del propio período): solo cuenta como anterior si tiene última visita previa; si no, queda en `conFichaSinFechaClara` para que decida Fausto. Lo que no se puede determinar (agenda en Supabase sin columna de creación —se informan las columnas disponibles—, turnos sin fecha, fecha de creación que parece de una migración, turnos cancelados que la lectura no trae) sale en `noDeterminable`, nunca estimado.
+- Sin archivos nuevos bajo `api/` (sigue 12/12): todo dentro de `api/gestion/admin.js`.
+
 ## 2026-10-24 — Tramo 9: config/actividad/alertas sin Google y respaldo diario propio (con SUPABASE_WRITES_PRIMARY=1)
 - `lib/adminConfig.js`: configuración, actividad y alertas usan solo Supabase (RPC existentes), sin tocar la planilla de Google.
 - `lib/respaldoSupabase.js` + RPC `consultorio_exportar_respaldo`: el cron diario sube un `YYYY-MM-DD.json.gz` (pacientes con ficha completa, turnos, bloqueos, consolidados, configuración, archivos) al bucket privado `respaldos` y conserva los últimos 14. Fallo = alerta por mail, no rompe el healthcheck.

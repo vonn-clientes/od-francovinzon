@@ -182,6 +182,7 @@
     <div class="nav" id="nav">
       <button data-sec="dashboard" class="active">📊 Dashboard</button>
       <button data-sec="reserva-online">🌐 Reserva online</button>
+      <button data-sec="campanas">📣 Campañas</button>
       <button data-sec="horarios">🗓️ Horarios y agenda</button>
       <button data-sec="textos">✏️ Textos y plantillas</button>
       <button data-sec="listas">📋 Listas desplegables</button>
@@ -314,6 +315,28 @@
           <button class="btn btn-primary" id="ro-toggle-btn">Cambiar</button>
           <div class="msg" id="ro-msg"></div>
         </div>
+      </div>
+
+      <!-- ---------- Campañas ---------- -->
+      <div class="section hidden" id="sec-campanas">
+        <div class="card">
+          <h2>Campañas</h2>
+          <p class="hint">
+            Iniciá una campaña cuando arranque la publicidad y finalizala cuando termine. El panel cuenta cuántas
+            <strong>personas nuevas</strong> sacaron turno en ese período (por la fecha en que se creó el turno, no
+            la del turno) y lo compara con los 30 días anteriores. Los casos dudosos (DNI de prueba, mismo nombre con
+            otro DNI, etc.) no se cuentan: van en una lista aparte para que decidas vos. Por defecto solo se ven
+            totales; los nombres quedan en un desplegable cerrado.
+          </p>
+          <div class="field-row">
+            <div class="field"><label for="camp-nombre">Nombre de la campaña</label><input type="text" id="camp-nombre" maxlength="80" placeholder="Ej: Instagram noviembre"></div>
+            <div class="field"><label for="camp-inicio">Fecha de inicio</label><input type="date" id="camp-inicio"></div>
+            <div class="field"><label for="camp-inversion">Inversión en pesos (opcional)</label><input type="text" id="camp-inversion" inputmode="decimal" placeholder="Ej: 50.000"></div>
+          </div>
+          <button class="btn btn-primary" id="camp-iniciar">Iniciar campaña</button>
+          <div class="msg" id="camp-msg"></div>
+        </div>
+        <div id="camp-lista"><p class="hint">Cargando...</p></div>
       </div>
 
       <!-- ---------- Horarios y agenda ---------- -->
@@ -634,6 +657,7 @@
         await cargarDashboardAvanzado();
       },
       'reserva-online': cargarReservaOnline,
+      campanas: cargarCampanas,
       horarios: cargarHorarios, textos: cargarTextos,
       listas: cargarListas, radios: cargarRadios, pacientes: () => {},
       accesos: () => {}, actividad: cargarActividad, monitoreo: cargarMonitoreo,
@@ -646,6 +670,100 @@
     el.textContent = texto;
     el.className = `msg ${tipo || ''}`;
   }
+
+
+  // ---------- Campañas ----------
+  // Solo totales por defecto (ver api/gestion/admin.js, recurso=campanas): los nombres se piden
+  // aparte (?detalle=1) recién cuando se abre el desplegable de esa campaña.
+  const fmtPesos = (n) => (n == null ? '—' : `$${Number(n).toLocaleString('es-AR')}`);
+  const fmtFechaYmd = (ymd) => (ymd ? ymd.split('-').reverse().join('/') : '');
+  function hoyArYmd() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  }
+  function tileCampana(num, label) {
+    return `<div class="stat-tile"><div class="num">${escapeHtmlAdmin(String(num))}</div><div class="label">${escapeHtmlAdmin(label)}</div></div>`;
+  }
+  function htmlCampana(c) {
+    const m = c.metricas;
+    const abierta = !c.fin;
+    const encabezado = `<h2>${escapeHtmlAdmin(c.nombre)} <span class="hint" style="font-size:12px;">· ${fmtFechaYmd(c.inicio)} → ${abierta ? 'en curso' : fmtFechaYmd(c.fin)}${c.inversion != null ? ` · inversión ${fmtPesos(c.inversion)}` : ''}</span></h2>`;
+    if (!m) return `<div class="card" data-camp="${c.id}">${encabezado}<p class="hint">No se pudieron calcular las métricas ahora. Probá actualizar en un rato.</p></div>`;
+    const dif = m.promedioDiarioNuevas - m.promedioDiarioNuevasPrevios30;
+    const dudosos = (m.dudosos || []).length
+      ? `<details style="margin-top:10px;"><summary>${m.dudosos.length} caso(s) dudoso(s) — no se cuentan, decidí vos</summary>
+          <ul style="margin:8px 0 0 18px;font-size:12.5px;">${m.dudosos.map((d) => `<li>${escapeHtmlAdmin(d.motivo)} <span class="hint">(${escapeHtmlAdmin(d.identificadorParcial)})</span></li>`).join('')}</ul></details>`
+      : '';
+    const avisos = (m.noDeterminable || []).length
+      ? `<div class="hint" style="margin-top:10px;">⚠️ No se pudo determinar con los datos disponibles:<ul style="margin:4px 0 0 18px;">${m.noDeterminable.map((n) => `<li>${escapeHtmlAdmin(n.motivo)}${n.columnasDisponibles ? ` (columnas: ${escapeHtmlAdmin(n.columnasDisponibles.join(', '))})` : ''}</li>`).join('')}</ul></div>`
+      : '';
+    return `<div class="card" data-camp="${c.id}">
+      ${encabezado}
+      <div class="stat-grid">
+        ${tileCampana(m.turnosCreados, 'Turnos creados')}
+        ${tileCampana(m.personasDistintas, 'Personas distintas')}
+        ${tileCampana(m.nuevas, 'Nuevas')}
+        ${tileCampana(m.recurrentes, 'Recurrentes')}
+        ${tileCampana(`${m.promedioDiarioNuevas.toLocaleString('es-AR')} / día`, `Nuevas por día (antes: ${m.promedioDiarioNuevasPrevios30.toLocaleString('es-AR')})`)}
+        ${tileCampana(fmtPesos(m.costoPorNueva), c.inversion != null ? 'Costo por paciente nuevo' : 'Costo por nuevo (cargá la inversión)')}
+      </div>
+      <p class="hint" style="margin-bottom:6px;">${dif > 0 ? `Por encima del promedio de los 30 días previos (+${dif.toLocaleString('es-AR', { maximumFractionDigits: 2 })} por día).` : 'No supera el promedio diario de los 30 días previos.'}${m.conFichaSinFechaClara ? ` · ${m.conFichaSinFechaClara} persona(s) sin turnos previos pero con ficha cuya antigüedad no se puede confirmar (no se cuentan ni como nuevas ni como recurrentes: decidí vos).` : ''}</p>
+      ${dudosos}${avisos}
+      <details class="camp-nombres" style="margin-top:10px;"><summary>Ver nombres</summary><div class="camp-nombres-cuerpo hint">Cargando...</div></details>
+      ${abierta ? `<div class="field-row" style="margin-top:12px;"><div class="field" style="max-width:200px;"><label>Fecha de cierre</label><input type="date" class="camp-fin" value="${hoyArYmd()}"></div></div><button class="btn btn-outline camp-finalizar">Finalizar campaña</button>` : ''}
+    </div>`;
+  }
+  async function cargarCampanas() {
+    const cont = document.getElementById('camp-lista');
+    const inicio = document.getElementById('camp-inicio');
+    if (!inicio.value) inicio.value = hoyArYmd();
+    try {
+      const r = await apiGet('campanas');
+      const lista = (r.campanas || []).slice().reverse();
+      cont.innerHTML = lista.length ? lista.map(htmlCampana).join('') : '<p class="hint">Todavía no hay campañas.</p>';
+      if (r.error) cont.insertAdjacentHTML('afterbegin', `<p class="hint">⚠️ ${escapeHtmlAdmin(r.error)}</p>`);
+    } catch { cont.innerHTML = '<p class="hint">No se pudieron cargar las campañas.</p>'; }
+  }
+  document.getElementById('camp-iniciar').addEventListener('click', async () => {
+    const nombre = document.getElementById('camp-nombre').value.trim();
+    if (!nombre) return setMsg('camp-msg', 'Poné un nombre para la campaña.', 'error');
+    const btn = document.getElementById('camp-iniciar');
+    btn.disabled = true; setMsg('camp-msg', 'Guardando...', '');
+    try {
+      const r = await apiPost('campanas', { accion: 'iniciar', nombre, inicio: document.getElementById('camp-inicio').value, inversion: document.getElementById('camp-inversion').value });
+      if (!r.success) return setMsg('camp-msg', r.error || 'No se pudo iniciar.', 'error');
+      document.getElementById('camp-nombre').value = ''; document.getElementById('camp-inversion').value = '';
+      setMsg('camp-msg', 'Campaña iniciada ✓', 'ok');
+      await cargarCampanas();
+    } catch { setMsg('camp-msg', 'No se pudo iniciar. Revisá tu conexión.', 'error'); }
+    finally { btn.disabled = false; }
+  });
+  document.getElementById('camp-lista').addEventListener('click', async (e) => {
+    const card = e.target.closest('[data-camp]');
+    if (!card) return;
+    if (e.target.classList.contains('camp-finalizar')) {
+      e.target.disabled = true;
+      try {
+        const r = await apiPost('campanas', { accion: 'finalizar', id: card.dataset.camp, fin: card.querySelector('.camp-fin').value });
+        if (!r.success) { setMsg('camp-msg', r.error || 'No se pudo finalizar.', 'error'); e.target.disabled = false; return; }
+        setMsg('camp-msg', 'Campaña finalizada ✓', 'ok');
+        await cargarCampanas();
+      } catch { setMsg('camp-msg', 'No se pudo finalizar.', 'error'); e.target.disabled = false; }
+    }
+  });
+  // Los nombres se piden recién al abrir el desplegable (nunca viajan con la carga normal).
+  document.getElementById('camp-lista').addEventListener('toggle', async (e) => {
+    const det = e.target;
+    if (!det.classList?.contains('camp-nombres') || !det.open || det.dataset.cargado) return;
+    const card = det.closest('[data-camp]');
+    const cuerpo = det.querySelector('.camp-nombres-cuerpo');
+    try {
+      const r = await apiGet('campanas', { id: card.dataset.camp, detalle: '1' });
+      const n = r.campanas?.[0]?.metricas?.nombres || { nuevas: [], recurrentes: [] };
+      const lista = (arr) => (arr.length ? arr.map((x) => escapeHtmlAdmin(x)).join(', ') : '—');
+      cuerpo.innerHTML = `<strong>Nuevas:</strong> ${lista(n.nuevas)}<br><strong>Recurrentes:</strong> ${lista(n.recurrentes)}`;
+      det.dataset.cargado = '1';
+    } catch { cuerpo.textContent = 'No se pudieron cargar los nombres.'; }
+  }, true);
 
   // ---------- Dashboard ----------
   // "Datos de hoy 02:00" / "Actualizado hace un momento": las métricas se precalculan todos

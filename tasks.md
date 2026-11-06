@@ -1,7 +1,7 @@
 # Pendientes activos
 
 **2026-11-06 — CAMPAÑAS en /admin (rama `campanas-fase1`, NO publicada a main — falta tu OK)**. Código y tests listos (16 tests nuevos en verde, 82 en total sin romper nada). Pendiente:
-1. ⏳ **Fase 1 — el número real** (personas nuevas con turno creado entre el 1/11 00:00 y el 5/11 23:59, hora Argentina): se obtiene abriendo en el preview de la rama `/api/gestion/admin?recurso=campana-analisis&desde=2026-11-01&hasta=2026-11-05&key=<ADMIN_KEY>` (el preview de Vercel está protegido: hay que abrirlo con la sesión de Vercel de Fausto). Si la agenda en Supabase no trae fecha de creación del turno, la respuesta lo dice en `noDeterminable` (con la lista de columnas) en vez de dar un número inventado.
+1. ⏳ **Fase 1 — el número real** (personas nuevas con turno creado entre el 1/11 00:00 y el 5/11 23:59, hora Argentina): se obtiene abriendo en el preview de la rama `/api/gestion/admin?recurso=campana-analisis&desde=2026-11-01&hasta=2026-11-05&key=<ADMIN_KEY>` (el preview de Vercel está protegido: hay que abrirlo con la sesión de Vercel de Fausto). La agenda en Supabase no guarda la fecha de creación del turno: el conteo sale del registro de actividad (límite pedido: 20.000 entradas; si el RPC devuelve menos, el panel avisa en `noDeterminable` desde qué fecha llega). Mejora pendiente: agregar una columna `creado_en timestamptz default now()` a `consultorio.turnos` para no depender del registro.
 2. ⏳ Probar la sección **Campañas** en el preview (iniciar, ver métricas, finalizar) y recién ahí publicar a `main` (regla permanente: rama + preview, nunca push directo).
 3. Decisión de Fausto (2026-11-06): **no** se agrega el campo "¿Cómo nos conociste?" (ni al cargar el turno ni en la ficha).
 

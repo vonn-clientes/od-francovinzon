@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFechaFlexible, analizarPeriodo, metricasCampana, esDniPrueba, hoyAR, sumarDiasYmd, diasEntre } from '../lib/campanasAnalisis.js';
+import { unirAgendaConActividad, parseFechaFlexible, analizarPeriodo, metricasCampana, esDniPrueba, hoyAR, sumarDiasYmd, diasEntre } from '../lib/campanasAnalisis.js';
 
 const ar = (s) => Date.parse(`${s}-03:00`);
 // Todos los datos son inventados.
@@ -125,4 +125,38 @@ test('métricas de campaña: promedio vs 30 días previos y costo por nueva', ()
   assert.equal(m.costoPorNueva, 25000);
   const sinInv = metricasCampana({ campana: { inicio: '2026-11-01', fin: null }, registros, padron: [], hoy: '2026-11-06' });
   assert.equal(sinInv.costoPorNueva, null);
+});
+
+test('une el registro de actividad con la agenda por nombre + fecha + hora (Argentina)', () => {
+  const agenda = [
+    { dni: '30111222', telefono: '3442000001', nombre: 'Ana Prueba', inicio: ar('2026-11-20T10:00:00') },
+    { dni: '31222333', telefono: '3442000002', nombre: 'Beto Ejemplo', inicio: ar('2026-09-10T09:30:00') }, // sin alta en el registro
+  ];
+  const actividad = [
+    { tipo: 'turno_creado', fecha: '2026-11-02T13:00:00+00:00', detalle: 'Ana Prueba — 2026-11-20 10:00' },
+    { tipo: 'sobreturno_creado', fecha: '2026-11-03T13:00:00+00:00', detalle: 'Cami Cancelada — 2026-11-21 11:00' }, // ya no está en la agenda
+    { tipo: 'login', fecha: '2026-10-27T13:00:00+00:00', detalle: '/admin' },
+  ];
+  const { registros, coberturaDesde } = unirAgendaConActividad({ agenda, actividad });
+  assert.equal(coberturaDesde, Date.parse('2026-10-27T13:00:00+00:00'));
+  assert.equal(registros.length, 3);
+  const ana = registros.find((r) => r.nombre === 'Ana Prueba');
+  assert.equal(ana.dni, '30111222');
+  assert.equal(ana.creado, Date.parse('2026-11-02T13:00:00+00:00'));
+  const cami = registros.find((r) => r.nombre === 'Cami Cancelada');
+  assert.equal(cami.dni, ''); // sin datos de contacto → irá a dudosos, nunca cuenta como nueva
+  const beto = registros.find((r) => r.nombre === 'Beto Ejemplo');
+  assert.ok(Number.isNaN(beto.creado)); // creación desconocida
+  const r = analizarPeriodo({ registros, desde: '2026-11-01', hasta: '2026-11-05', coberturaDesde });
+  assert.equal(r.nuevas, 1);
+  assert.equal(r.dudosos.length, 1);
+  assert.equal(r.noDeterminable.length, 0);
+  // Beto (turno del 10/09, creación desconocida) cuenta como turno previo de sí mismo si vuelve a sacar turno
+  const r2 = analizarPeriodo({ registros: [...registros, { dni: '31222333', telefono: '3442000002', nombre: 'Beto Ejemplo', creado: ar('2026-11-04T10:00:00') }], desde: '2026-11-01', hasta: '2026-11-05' });
+  assert.equal(r2.recurrentes, 1);
+});
+
+test('si el registro empieza después del inicio del período se avisa', () => {
+  const r = analizarPeriodo({ registros: [], desde: '2026-11-01', hasta: '2026-11-05', coberturaDesde: ar('2026-11-03T00:00:00') });
+  assert.match(r.noDeterminable[0].motivo, /empieza después/);
 });

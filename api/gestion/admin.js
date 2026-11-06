@@ -33,7 +33,7 @@ import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesC
 import { escrituraPrimariaActiva } from '../../lib/escrituraPrimaria.js';
 import { leerFichaSupabase, leerMovimientosSupabase } from '../../lib/fichaDesdeSupabase.js';
 import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc, leerAgendaRpc, turnosDeLectura } from '../../lib/agendaSupabase.js';
-import { analizarPeriodo, metricasCampana, hoyAR, parseFechaFlexible } from '../../lib/campanasAnalisis.js';
+import { analizarPeriodo, metricasCampana, hoyAR, parseFechaFlexible, unirAgendaConActividad } from '../../lib/campanasAnalisis.js';
 import { randomBytes } from 'node:crypto';
 
 // Config de solo-lectura que también necesita /pacientes y /gestion (listas
@@ -138,6 +138,7 @@ export default async function handler(req, res) {
 // únicamente con ?detalle=1 y los casos dudosos se identifican por los últimos 2 dígitos.
 const LECTURA_ATRAS_MS = 2 * 365 * 24 * 60 * 60 * 1000; // historial para saber si alguien ya había sacado turno
 const LECTURA_ADELANTE_MS = 400 * 24 * 60 * 60 * 1000; // el turno puede ser para meses después de haberlo creado
+const LIMITE_ACTIVIDAD_CAMPANAS = 20000;
 const CAMPOS_CREACION_AGENDA = ['created_at', 'creado_en', 'creado', 'calendar_created', 'fecha_creacion', 'inserted_at'];
 
 async function leerRegistrosAgenda() {
@@ -152,19 +153,19 @@ async function leerRegistrosAgenda() {
     const filas = turnosDeLectura(datos);
     const campo = CAMPOS_CREACION_AGENDA.find((k) => filas.some((f) => f && f[k]));
     const notas = [{ motivo: 'La lectura de la agenda no incluye turnos cancelados: quien sacó turno y lo canceló no se cuenta.' }];
-    if (!campo) {
-      return { registros: [], noDeterminable: [...notas, {
-        motivo: 'La agenda en Supabase no trae ninguna columna con la fecha de creación del turno.',
-        columnasDisponibles: Object.keys(filas[0] || {}),
-      }] };
-    }
-    const registros = filas
+    const agenda = filas
       .filter((t) => t && t.tipo !== 'bloqueo' && String(t.paciente_nombre || '').trim())
-      .map((t) => ({
-        dni: digitos(t.dni), telefono: digitos(t.telefono), nombre: String(t.paciente_nombre).trim(),
-        creado: Date.parse(t[campo]), inicio: Date.parse(t.inicio),
-      }));
-    return { registros, noDeterminable: notas };
+      .map((t) => ({ dni: digitos(t.dni), telefono: digitos(t.telefono), nombre: String(t.paciente_nombre).trim(), inicio: Date.parse(t.inicio), creadoAgenda: campo ? Date.parse(t[campo]) : NaN }));
+    if (campo) return { registros: agenda.map((t) => ({ ...t, creado: t.creadoAgenda })), noDeterminable: notas };
+    // La agenda no guarda cuándo se creó cada turno: la fecha sale del registro de actividad, que anota
+    // cada alta ("turno_creado"/"sobreturno_creado").
+    let actividad = [];
+    try { actividad = await leerActividadReciente(LIMITE_ACTIVIDAD_CAMPANAS); } catch { actividad = []; }
+    const { registros, coberturaDesde } = unirAgendaConActividad({ agenda, actividad });
+    return { registros, coberturaDesde, noDeterminable: [...notas, {
+      motivo: `La agenda en Supabase no guarda la fecha de creación del turno: se usó el registro de actividad (${actividad.length} entradas).`,
+      columnasDisponibles: Object.keys(filas[0] || {}),
+    }] };
   }
 
   let calendar;
@@ -206,7 +207,7 @@ async function cargarBaseCampanas() {
   } else {
     noDeterminable.push({ motivo: 'No se pudo leer el padrón de pacientes: no se puede distinguir quién ya tenía ficha.' });
   }
-  return { registros: agenda.registros, padron, noDeterminable };
+  return { registros: agenda.registros, padron, noDeterminable, coberturaDesde: agenda.coberturaDesde ?? null };
 }
 
 const esFechaYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00-03:00`));
@@ -216,7 +217,7 @@ async function getCampanaAnalisis(req, res) {
   if (!esFechaYmd(desde) || !esFechaYmd(hasta) || desde > hasta) return res.status(400).json({ success: false, error: 'desde y hasta deben ser fechas YYYY-MM-DD válidas.' });
   const base = await cargarBaseCampanas();
   if (base.error) return res.status(503).json({ success: false, error: base.error });
-  const salida = analizarPeriodo({ registros: base.registros, padron: base.padron, desde, hasta, detalle: req.query?.detalle === '1' });
+  const salida = analizarPeriodo({ registros: base.registros, padron: base.padron, desde, hasta, detalle: req.query?.detalle === '1', coberturaDesde: base.coberturaDesde });
   salida.noDeterminable.push(...base.noDeterminable);
   return res.status(200).json(salida);
 }
@@ -232,7 +233,7 @@ async function getCampanas(req, res) {
   if (base.error) return res.status(200).json({ campanas: aMostrar.map((c) => ({ ...c, metricas: null })), error: base.error });
   const hoy = hoyAR();
   const salida = aMostrar.map((c) => {
-    const metricas = metricasCampana({ campana: c, registros: base.registros, padron: base.padron, hoy, detalle });
+    const metricas = metricasCampana({ campana: c, registros: base.registros, padron: base.padron, hoy, detalle, coberturaDesde: base.coberturaDesde });
     metricas.noDeterminable.push(...base.noDeterminable);
     return { ...c, metricas };
   });

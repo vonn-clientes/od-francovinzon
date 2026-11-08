@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-08 — Nombre del sitio en Google (WebSite schema)
+
+- Google mostraba "Vercel" y la URL `od-francovinzon.vercel.app` en los resultados (índice viejo). La redirección 301/308 `*.vercel.app` → `odfrancovinzon.vonn.com.ar`, los canonical y el sitemap ya estaban bien.
+- Se agregó a `index.html` el JSON-LD `WebSite` (`name` + `url` del dominio VONN), que es lo que Google usa para el nombre del sitio en los resultados. Falta que Google re-rastree (Search Console → Solicitar indexación).
+
 ## 2026-11-06 — Campañas v2: edición, varias inversiones, motivos, casos resueltos a mano y resumen exportable (rama `campanas-v2`, sin publicar)
 - **Edición** (`recurso=campanas`, `accion=editar`): nombre, fecha de inicio y de cierre (también en campañas ya finalizadas; cierre vacío = reabrirla) e inversiones. **Archivar/desarchivar** (sale de la vista, se conserva en "Campañas archivadas") y **eliminar** (con confirmación). Las campañas viejas con un solo número `inversion` se leen como una inversión y se normalizan al editarlas.
 - **Varias inversiones por campaña** (`inversiones: [{concepto, monto}]`, ej. "Búsqueda $42.972" + "Display $49.924"): se suman y el **costo por paciente nuevo usa el total** (pauta real). Montos en formato argentino (`50.000`, `49.924,50`).

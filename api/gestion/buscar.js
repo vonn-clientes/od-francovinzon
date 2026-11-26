@@ -335,7 +335,7 @@ async function tareas(req, res) {
     if (process.env.SUPABASE_AGENDA_PRIMARY === '1') {
       const eventos = await eventosAgenda(desde.toISOString(), hasta.toISOString());
       if (eventos === null) return res.status(503).json({ error: 'No se pudo leer la agenda en Supabase.' });
-      principalItems = eventos.filter((e) => e.__tipo !== 'sobreturno' && e.__tipo !== 'bloqueo').map((e) => ({ id: e.id, summary: e.summary, description: e.description, start: e.start, end: e.end }));
+      principalItems = eventos.filter((e) => e.__tipo !== 'sobreturno' && e.__tipo !== 'bloqueo').map((e) => ({ id: e.id, summary: e.summary, description: e.description, start: e.start, end: e.end, __tipo: e.__tipo }));
       sobreItems = eventos.filter((e) => e.__tipo === 'sobreturno').map((e) => ({ id: e.id, summary: e.summary, description: e.description, start: e.start, end: e.end }));
       eventos.filter((e) => e.__tipo === 'bloqueo').forEach((e) => principalItems.push({ id: e.id, summary: e.summary, description: `${e.description || ''}${BLOCK_MARKER}`, start: e.start, end: e.end }));
     } else {

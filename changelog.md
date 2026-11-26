@@ -797,3 +797,9 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 ## 2026-11-26 — Cartel de cumpleaños en /gestion y /pacientes
 - `assets/cumples-hoy.js`: cartel fijo en la barra izquierda (debajo de la fecha) con los pacientes con turno hoy que cumplen años, con hora del turno y edad. Se recarga cada 10 min y al cambiar de día.
 - `api/gestion/turnos-dia.js`: con `?cumples=1` (y un solo día) agrega `cumple: { edad }` a los turnos con ficha confirmada por DNI, leyendo la fecha de nacimiento de la ficha en Supabase (`lib/cumples.js`). Sin el parámetro no cambia nada. 29/2 se festeja el 28/2 en años no bisiestos. Sigue en 12/12 funciones.
+
+## 2026-11-26 — /admin "Pacientes sin ficha": turnos compartidos y asignaciones que no se guardaban
+- Turnos con varias personas en el nombre ("Agostina y Benja Schulman"): `lib/turnoCompartido.js` separa los nombres y sugiere la ficha de cada uno (mismo teléfono + apellido + nombre que empieza igual). En /admin aparece "Turno de 2 personas" con botón "Vincular a las 2 fichas"; se guarda en la config `turnosCompartidos` (recurso POST `turno-compartido`) y deja de figurar sin ficha. No se toca el turno ni la agenda.
+- Candidatas: `getSinFicha` suma las fichas de Supabase que no tienen fila en consolidados (antes no aparecían, p. ej. Benjamin Schulman).
+- Asignar ficha a una persona sin DNI actualizaba la fila propia de la ficha (el RPC buscaba primero por ficha_id) y la persona seguía "sin ficha" aunque /admin decía OK. Ahora se manda el `id` exacto de la fila y se verifica después de guardar. Requiere la función de `supabase/consolidados_upsert_por_id.sql`.
+- Tareas de /gestion: un feriado marcado "Sí, se atiende" (marcador `feriado_atendido`) aparecía como "Reorganizar turnos" porque con la agenda en Supabase el marcador llega como `__tipo` y no en la descripción (caso 7/12/2026, 14 turnos). `buscar.js` ahora lo reconoce.

@@ -35,6 +35,8 @@ import { leerFichaSupabase, leerMovimientosSupabase } from '../../lib/fichaDesde
 import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc, leerAgendaRpc, turnosDeLectura } from '../../lib/agendaSupabase.js';
 import { analizarPeriodo, metricasCampana, hoyAR, parseFechaFlexible, unirAgendaConActividad, normalizarCampana, limpiarInversiones, filasResumenCampana, DECISIONES } from '../../lib/campanasAnalisis.js';
 import { randomBytes } from 'node:crypto';
+import { listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
+import { sugerirTurnoCompartido, claveCompartido } from '../../lib/turnoCompartido.js';
 
 // Config de solo-lectura que también necesita /pacientes y /gestion (listas
 // desplegables, radios, plantilla de WhatsApp) — no son datos sensibles, así que
@@ -122,6 +124,7 @@ export default async function handler(req, res) {
       if (recurso === 'sellar-config') return await conError(sellarConfig, req, res);
       if (recurso === 'asignar-ficha') return await postAsignarFicha(req, res);
       if (recurso === 'desasignar-ficha') return await postDesasignarFicha(req, res);
+      if (recurso === 'turno-compartido') return await conError(postTurnoCompartido, req, res);
       return res.status(400).json({ success: false, error: 'recurso inválido' });
     }
 
@@ -1572,6 +1575,15 @@ async function getSinFicha(req, res) {
     console.warn('[admin.js] no se pudo completar el índice de fichas desde Drive:', err?.message || err);
   }
   const fichasPorId = new Map(filas.filter((f) => f.fichaId).map((f) => [f.fichaId, f]));
+  // Fichas que existen en Supabase pero todavía no tienen fila en la planilla consolidada
+  // (p. ej. un hermano que nunca se editó): sin esto no aparecían como posibles coincidencias.
+  if (escrituraPrimariaActiva()) {
+    const pacientesSb = await listarPacientesSupabase().catch(() => null);
+    for (const p of pacientesSb || []) {
+      if (!p.id || fichasPorId.has(p.id)) continue;
+      fichasPorId.set(p.id, { fichaId: p.id, nombre: p.nombre, apellido: p.apellido, dni: p.dni, telefono: p.telefono });
+    }
+  }
   for (const archivo of archivos) {
     if (archivo.id === FICHA_TEMPLATE_ID || /^⭐/.test(archivo.name) || /\(no tocar\)\s*$/i.test(archivo.name)) continue;
     const identidad = parsearNombreArchivo(archivo.name);
@@ -1623,7 +1635,14 @@ async function getSinFicha(req, res) {
       turnosPasados: 0, ultimaVisita: '', proximoTurno: t.start,
     });
   }
-  const sinFichaTodos = [...sinFicha, ...virtuales].sort((a, b) => {
+  // Turnos compartidos ("Agostina y Benja Schulman"): los ya resueltos se ocultan; el resto
+  // lleva una sugerencia por persona para confirmarlos con un toque.
+  const resueltos = new Set(((await getConfig('turnosCompartidos', [])) || []).map((t) => t.clave));
+  const fichasLista = [...fichasPorId.values()];
+  const conCompartidos = [...sinFicha, ...virtuales]
+    .filter((p) => !resueltos.has(claveCompartido(p)))
+    .map((p) => { const c = sugerirTurnoCompartido(p, fichasLista); return c ? { ...p, compartido: c } : p; });
+  const sinFichaTodos = conCompartidos.sort((a, b) => {
     if (a.proximoTurno && b.proximoTurno) return a.proximoTurno.localeCompare(b.proximoTurno) || a.nombre.localeCompare(b.nombre, 'es');
     if (a.proximoTurno) return -1;
     if (b.proximoTurno) return 1;
@@ -1690,6 +1709,20 @@ async function postAsignarFicha(req, res) {
   } catch { /* best-effort */ }
   await logActividad({ tipo: 'asignar_ficha', detalle: `Turno de ${r.nombre} asignado a ficha ${req.body.fichaId}`, actor: 'admin' });
   res.status(200).json({ success: true, fila });
+}
+
+// Un turno con varias personas en el nombre se vincula a la ficha de cada una. No se toca el
+// turno ni la agenda: se guarda en la configuración de /admin para que deje de figurar "sin ficha".
+async function postTurnoCompartido(req, res) {
+  const { nombre, telefono, dni, fichas } = req.body || {};
+  const ids = [...new Set((Array.isArray(fichas) ? fichas : []).map(String).filter(Boolean))];
+  if (!nombre || ids.length < 2) return res.status(400).json({ success: false, error: 'Elegí la ficha de cada persona del turno.' });
+  const actuales = (await getConfig('turnosCompartidos', [])) || [];
+  const clave = claveCompartido({ nombre, telefono, dni });
+  const nuevos = actuales.filter((t) => t.clave !== clave).concat({ clave, nombre, telefono: telefono || '', dni: dni || '', fichas: ids, fecha: new Date().toISOString() });
+  await setConfig('turnosCompartidos', nuevos);
+  await logActividad({ tipo: 'turno_compartido', detalle: `Turno de "${nombre}" vinculado a ${ids.length} fichas: ${ids.join(', ')}`, actor: 'admin' });
+  res.status(200).json({ success: true });
 }
 
 async function postDesasignarFicha(req, res) {

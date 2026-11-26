@@ -156,6 +156,7 @@
   .sf-candidatas-label { color:var(--muted); font-size:11px; font-weight:600; }
   .sf-candidata { text-align:left; white-space:normal; line-height:1.3; }
   .sf-candidata small { display:block; color:var(--muted); font-size:11px; }
+.sf-compartido-item{display:flex;flex-direction:column;padding:4px 0}.sf-compartido-item small{color:#666}
 </style>
 </head>
 <body>
@@ -1318,7 +1319,15 @@
         return `<tr>
           <td>${escapeHtmlAdmin(p.nombre)}${turnoSf(p)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
           <td class="sf-ok" colspan="1">✓ Asignado a ${escapeHtmlAdmin(as.nombre)}</td>
-          <td><button class="btn btn-outline" data-sf-deshacer="${as.fila || p.fila}" data-sf-clave="${escapeHtmlAdmin(String(claveSf(p)))}">Cancelar asignación</button></td></tr>`;
+          <td>${as.compartido ? '' : `<button class="btn btn-outline" data-sf-deshacer="${as.fila || p.fila}" data-sf-clave="${escapeHtmlAdmin(String(claveSf(p)))}">Cancelar asignación</button>`}</td></tr>`;
+      }
+      if (p.compartido) {
+        const listos = p.compartido.every((c) => c.sugerida);
+        return `<tr>
+          <td>${escapeHtmlAdmin(p.nombre)}${turnoSf(p)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
+          <td><div class="sf-candidatas"><span class="sf-candidatas-label">Turno de ${p.compartido.length} personas</span>${p.compartido.map((c) => `<div class="sf-compartido-item"><span>${escapeHtmlAdmin(c.nombre)}</span><small>${c.sugerida ? '→ ficha de ' + escapeHtmlAdmin(c.sugerida.nombre) : 'No encontré su ficha (mismo teléfono y apellido)'}</small></div>`).join('')}</div></td>
+          <td>${listos ? `<button class="btn btn-primary" data-sf-compartido="${sinFichaLista.indexOf(p)}">Vincular a las ${p.compartido.length} fichas</button>` : ''}
+              <button class="btn btn-outline" data-sf-elegir="${p.fila}" data-sf-idx="${sinFichaLista.indexOf(p)}" data-sf-nombre="${escapeHtmlAdmin(p.nombre)}">Elegir ficha…</button></td></tr>`;
       }
       return `<tr>
           <td>${escapeHtmlAdmin(p.nombre)}${turnoSf(p)}</td><td>${escapeHtmlAdmin(p.dni || '')}</td><td>${escapeHtmlAdmin(p.telefono || '')}</td>
@@ -1464,6 +1473,22 @@
   });
 
   document.querySelector('#sf-tabla').addEventListener('click', async (ev) => {
+    const comp = ev.target.closest('[data-sf-compartido]');
+    if (comp) {
+      const p = sinFichaLista[Number(comp.dataset.sfCompartido)];
+      if (!p?.compartido) return;
+      comp.disabled = true;
+      try {
+        const r = await apiPost('turno-compartido', { nombre: p.nombre, telefono: p.telefono || '', dni: p.dni || '', fichas: p.compartido.map((c) => c.sugerida.id) });
+        if (!r.success) throw new Error(r.error || 'No se pudo guardar.');
+        asignadasAhora.set(claveSf(p), { id: '', nombre: p.compartido.map((c) => c.sugerida.nombre).join(' y '), fila: 0, compartido: true });
+        renderSinFicha();
+        setMsg('sf-msg', 'Turno compartido vinculado a las fichas de cada persona.', 'ok');
+      } catch (e) {
+        if (e.message !== 'unauthorized') { setMsg('sf-msg', e.message || 'Error de red. Probá de nuevo.', 'error'); comp.disabled = false; }
+      }
+      return;
+    }
     const candidata = ev.target.closest('[data-sf-candidato]');
     if (candidata) {
       const el = candidata.closest('tr').querySelector('[data-sf-elegir]');

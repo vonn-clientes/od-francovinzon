@@ -793,3 +793,7 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 - 2026-10-26: crear ficha con Supabase primaria fallaba con 'No se pudo crear la ficha' si el formulario traia email (campo que la ficha no guarda); ahora se ignora.
 - 2026-10-26: al crear ficha con Supabase primaria, el email (y telefono/DNI) se guardan en el registro central de pacientes (consolidados), como en el camino Google.
 - 2026-10-26: con agenda en Supabase, /gestion mostraba todos los turnos sin confirmar (leia 'Confirmado: Sí' de la descripcion pero la confirmacion vive en la columna confirmado); eventosAgenda ahora lo refleja (descripcionConConfirmado).
+
+## 2026-11-26 — Cartel de cumpleaños en /gestion y /pacientes
+- `assets/cumples-hoy.js`: cartel fijo en la barra izquierda (debajo de la fecha) con los pacientes con turno hoy que cumplen años, con hora del turno y edad. Se recarga cada 10 min y al cambiar de día.
+- `api/gestion/turnos-dia.js`: con `?cumples=1` (y un solo día) agrega `cumple: { edad }` a los turnos con ficha confirmada por DNI, leyendo la fecha de nacimiento de la ficha en Supabase (`lib/cumples.js`). Sin el parámetro no cambia nada. 29/2 se festeja el 28/2 en años no bisiestos. Sigue en 12/12 funciones.

@@ -9,6 +9,7 @@ import { listarPacientesConsolidados } from '../../lib/pacientesConsolidados.js'
 import { mismaPersonaEstricta } from '../../lib/identidadTurno.js';
 import { normalizarDni } from '../../lib/pacientesSheet.js';
 import { eventosAgenda } from '../../lib/agendaSupabase.js';
+import { marcarCumples } from '../../lib/cumples.js';
 
 // Ficha confirmada (para el botón QR "Mis datos" y para no mostrar "Crear ficha"): SOLO si el
 // DNI coincide EXACTO con una persona del registro consolidado que ya tiene ficha (o, sin DNI, nombre
@@ -69,6 +70,7 @@ export default async function handler(req, res) {
             telefonoVerificado: extraerTelefonoVerificado(ev.description), confirmado: extraerConfirmado(ev.description) };
         });
         await asignarFichaId(items);
+        if (req.query.cumples === '1' && dias === 1) await marcarCumples(items, dateStr);
         items.sort((a, b) => new Date(a.start) - new Date(b.start));
         return res.status(200).json(items);
       }
@@ -142,6 +144,8 @@ export default async function handler(req, res) {
     });
 
     await asignarFichaId(items);
+    // Cartel de cumpleaños (solo lo pide /gestion y /pacientes con ?cumples=1, para no sumar lecturas al resto).
+    if (req.query.cumples === '1' && dias === 1) await marcarCumples(items, dateStr);
 
     items.sort((a, b) => new Date(a.start) - new Date(b.start));
 

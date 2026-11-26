@@ -465,7 +465,9 @@ async function tareas(req, res) {
     todos.forEach(({ ev, calendarId }) => {
       const allDay = !ev.start.dateTime;
       const { start, end } = eventBounds(ev);
-      const esMarcadorFeriado = allDay && (ev.description || '').includes(FERIADO_ATENDIDO_MARKER);
+      // Con la agenda en Supabase el marcador viene como __tipo, sin el texto en la descripción:
+      // sin este chequeo un feriado que SÍ se atiende aparecía como "Reorganizar turnos" (7/12/2026).
+      const esMarcadorFeriado = ev.__tipo === 'feriado_atendido' || (allDay && (ev.description || '').includes(FERIADO_ATENDIDO_MARKER));
       if (esMarcadorFeriado) {
         feriadosAtendidos.add(formatArgDay(start));
         return;

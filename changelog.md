@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-11-26 — /pacientes: el cuadro de confirmar "Borrar foto" quedaba tapado por el visor
+- `#confirm-overlay` pasa a `z-index: 1000` (antes 998, el visor de fotos era 999) y el aviso (toast) a 1001. Test nuevo que cuida el orden de capas (105 tests en verde).
+
 ## 2026-11-26 — /pacientes manda la clave en fotos y recetas (rama `seguridad/pacientes-manda-clave`)
 - `/pacientes` envía `x-gestion-key` (header, nunca en la URL) en fotos y recetas: listar, ver, subir, borrar, procesar y guardar. Las miniaturas y el visor cargan por fetch + blob. Con `MOBILE_REQUIERE_CLAVE` apagada no cambia nada para el consultorio; es el paso previo a prenderla.
 - Test nuevo `tests/pacientesClaveMovil.test.js` (104 tests en verde).

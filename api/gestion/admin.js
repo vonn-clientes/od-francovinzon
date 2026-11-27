@@ -33,7 +33,7 @@ import { armarHojas, crearXlsx, crearMarkdown } from '../../lib/exportPacientesC
 import { escrituraPrimariaActiva } from '../../lib/escrituraPrimaria.js';
 import { leerFichaSupabase, leerMovimientosSupabase } from '../../lib/fichaDesdeSupabase.js';
 import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc, leerAgendaRpc, turnosDeLectura } from '../../lib/agendaSupabase.js';
-import { analizarPeriodo, metricasCampana, hoyAR, parseFechaFlexible, unirAgendaConActividad, normalizarCampana, limpiarInversiones, filasResumenCampana, DECISIONES } from '../../lib/campanasAnalisis.js';
+import { analizarPeriodo, metricasCampana, metricasConResumenFinal, hoyAR, parseFechaFlexible, unirAgendaConActividad, normalizarCampana, limpiarInversiones, filasResumenCampana, DECISIONES } from '../../lib/campanasAnalisis.js';
 import { randomBytes } from 'node:crypto';
 import { listarPacientesSupabase } from '../../lib/busquedaSupabase.js';
 import { sugerirTurnoCompartido, claveCompartido } from '../../lib/turnoCompartido.js';
@@ -236,7 +236,17 @@ async function getCampanaAnalisis(req, res) {
 function metricasDe(c, base, hoy, detalle) {
   const metricas = metricasCampana({ campana: c, registros: base.registros, padron: base.padron, hoy, detalle, coberturaDesde: base.coberturaDesde, decisiones: base.decisiones, tratamientos: base.tratamientos });
   metricas.noDeterminable.push(...base.noDeterminable);
-  return metricas;
+  return metricasConResumenFinal(c, metricas);
+}
+
+// Guarda los totales de una campaña recién cerrada (sin listas de personas), para que no cambien después.
+async function resumenFinalDe(c, hoy) {
+  try {
+    const base = await cargarBaseCampanas();
+    if (base.error) return null;
+    const m = metricasCampana({ campana: c, registros: base.registros, padron: base.padron, hoy, detalle: false, coberturaDesde: base.coberturaDesde, decisiones: base.decisiones, tratamientos: base.tratamientos });
+    return { guardadoEn: new Date().toISOString(), metricas: m };
+  } catch { return null; }
 }
 
 async function getCampanas(req, res) {
@@ -337,7 +347,9 @@ async function postCampanas(req, res) {
     if (c.fin) return res.status(400).json({ success: false, error: 'La campaña ya estaba finalizada.' });
     const { error, campos } = validarCamposCampana({ fin: req.body.fin || hoy }, c);
     if (error) return res.status(400).json({ success: false, error });
-    await setConfig('campanas', campanas.map((x) => (x.id === c.id ? { ...x, fin: campos.fin } : x)));
+    const cerrada = { ...normalizarCampana(c), fin: campos.fin };
+    const resumenFinal = await resumenFinalDe(cerrada, hoy);
+    await setConfig('campanas', campanas.map((x) => (x.id === c.id ? { ...x, fin: campos.fin, ...(resumenFinal ? { resumenFinal } : {}) } : x)));
     await logActividad({ tipo: 'campana_finalizada', detalle: c.nombre, actor: 'admin' });
     return res.status(200).json({ success: true });
   }
@@ -346,6 +358,11 @@ async function postCampanas(req, res) {
     if (error) return res.status(400).json({ success: false, error });
     // normalizarCampana pasa el número suelto de las campañas viejas a la lista de inversiones.
     const editada = { ...normalizarCampana(c), ...campos };
+    // Si cambian las fechas de una campaña cerrada, el resumen guardado ya no vale: se vuelve a guardar.
+    if (editada.fin && (editada.inicio !== c.inicio || editada.fin !== c.fin)) {
+      const nuevo = await resumenFinalDe(editada, hoy);
+      if (nuevo) editada.resumenFinal = nuevo; else delete editada.resumenFinal;
+    }
     await setConfig('campanas', campanas.map((x) => (x.id === c.id ? editada : x)));
     await logActividad({ tipo: 'campana_editada', detalle: editada.nombre, actor: 'admin' });
     return res.status(200).json({ success: true, campana: editada });

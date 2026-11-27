@@ -25,3 +25,4 @@ import './respaldoAlerta.test.js';
 import './feriadoAtendidoCartel.test.js';
 import './dniRelleno.test.js';
 import './nombreExtension.test.js';
+import './campanaCongelada.test.js';

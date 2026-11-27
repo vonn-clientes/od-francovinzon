@@ -842,3 +842,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 ## 2026-11-27 — Identidad de pacientes más estricta
 - `normalizarDni()`: un DNI de relleno (menos de 6 dígitos o todos iguales, ej. 00000000) se trata como "sin DNI".
 - Migración `ficha_por_identidad_solo_dni_real`: `consultorio_ficha_por_identidad` ya no identifica por teléfono solo (el botón "Revisar mis datos" del link de confirmación solo aparece con DNI real y único).
+
+## 2026-11-27 — "¿Es este paciente?" no pisa nombres distintos
+- `confirmarMatch`: solo completa un nombre (ficha o turno) si el más corto está contenido palabra por palabra en el más largo; si difieren, no cambia nada (`esExtensionDeNombre` en `lib/identidadTurno.js`).

@@ -62,6 +62,7 @@ import { leerFichaSupabase } from '../../lib/fichaDesdeSupabase.js';
 import { guardarRecetaSupabase, listarRecetasSupabase, descargarRecetaSupabase, guardarTemporalReceta, leerTemporalReceta, borrarTemporalReceta } from '../../lib/recetasSupabase.js';
 import { saludSupabase } from '../../lib/consolidadosSupabase.js';
 import { crearRespaldoDiario } from '../../lib/respaldoSupabase.js';
+import { esExtensionDeNombre } from '../../lib/identidadTurno.js';
 import { agendaPrimariaActiva, eventosAgenda, escribirAgendaRpc } from '../../lib/agendaSupabase.js';
 
 // drive.files.create espera un stream legible en media.body, no un Buffer crudo.
@@ -1436,7 +1437,7 @@ async function confirmarMatch(req, res) {
       const nombreCompletoFicha = `${nombreFicha} ${apellidoFicha}`.trim();
       const turno = (turnoTitulo || '').trim();
 
-      if (turno && esMasCompleto(turno, nombreCompletoFicha)) {
+      if (turno && esMasCompleto(turno, nombreCompletoFicha) && esExtensionDeNombre(nombreCompletoFicha, turno)) {
         const partes = turno.split(/\s+/);
         const nuevoNombre = partes.shift() || '';
         const nuevoApellido = partes.join(' ');
@@ -1448,7 +1449,7 @@ async function confirmarMatch(req, res) {
           await escribirCampoEnSheet(fichaId, 'nombre', nuevoNombre);
           await escribirCampoEnSheet(fichaId, 'apellido', nuevoApellido);
         }
-      } else if (nombreCompletoFicha && esMasCompleto(nombreCompletoFicha, turno) && eventId && calendarId) {
+      } else if (nombreCompletoFicha && esMasCompleto(nombreCompletoFicha, turno) && esExtensionDeNombre(turno, nombreCompletoFicha) && eventId && calendarId) {
         const calendar = getCalendarClient();
         await conReintentos(() => calendar.events.patch({
           calendarId, eventId, requestBody: { summary: nombreCompletoFicha },

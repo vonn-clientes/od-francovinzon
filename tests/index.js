@@ -24,3 +24,4 @@ import './reservaPausadaYUsd.test.js';
 import './respaldoAlerta.test.js';
 import './feriadoAtendidoCartel.test.js';
 import './dniRelleno.test.js';
+import './nombreExtension.test.js';

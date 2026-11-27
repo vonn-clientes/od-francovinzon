@@ -25,3 +25,12 @@ test('/pacientes no deja la clave en URLs ni carga fotos con <img src> directo',
   assert.ok(!/visorImg\.src = url/.test(html));
   assert.ok(html.includes("headers.set('x-gestion-key', gestionKey)"));
 });
+
+test('el diálogo de confirmar queda por encima del visor de fotos (botón Borrar visible)', () => {
+  const z = (re) => Number(html.match(re)[1]);
+  const visor = z(/\.visor-overlay\s*\{[^}]*?z-index:\s*(\d+)/);
+  const confirmar = z(/#confirm-overlay\s*\{\s*z-index:\s*(\d+)/);
+  const toast = z(/#toast-container\s*\{[^}]*?z-index:\s*(\d+)/);
+  assert.ok(confirmar > visor, `confirmar (${confirmar}) debe estar sobre el visor (${visor})`);
+  assert.ok(toast > confirmar, 'los avisos siguen por encima de todo');
+});

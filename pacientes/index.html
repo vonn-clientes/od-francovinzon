@@ -240,7 +240,7 @@
   .ficha-load-error[hidden] { display: none; }
   .ficha-load-error button { flex-shrink: 0; padding: 8px 12px; border: 1px solid var(--navy); border-radius: 9px; background: var(--navy); color: white; font-weight: 600; }
 
-  #toast-container { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 999; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+  #toast-container { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 1001; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
   .toast { background: var(--navy); color: var(--white); padding: 11px 20px; border-radius: 100px; font-size: 13px; font-weight: 600; box-shadow: 0 8px 24px rgba(30,58,95,.28); opacity: 0; transform: translateY(-10px); transition: opacity .2s ease, transform .2s ease; }
   .toast.show { opacity: 1; transform: translateY(0); }
 
@@ -260,6 +260,8 @@
   .dolar-linea { font-size: 12.5px; color: var(--navy-soft); margin-bottom: 8px; }
   .confirm-overlay { position: fixed; inset: 0; background: rgba(30,58,95,.35); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 998; opacity: 0; transition: opacity .18s ease; }
   .confirm-overlay.show { opacity: 1; }
+  /* El diálogo de confirmar tiene que quedar SIEMPRE arriba del visor de fotos (999), si no el "Borrar" queda tapado. */
+  #confirm-overlay { z-index: 1000; }
   .confirm-box { background: var(--white); border-radius: 20px; padding: 24px 22px; max-width: 340px; width: 100%; box-shadow: 0 20px 50px rgba(30,58,95,.25); transform: scale(0.94); transition: transform .18s ease; }
   .confirm-overlay.show .confirm-box { transform: scale(1); }
   .confirm-box h3 { font-size: 17px; margin-bottom: 8px; }

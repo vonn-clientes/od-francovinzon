@@ -10,7 +10,7 @@ import { avisarFallo } from '../lib/alertas.js';
 import { rpcAdmin } from '../lib/adminSupabase.js';
 import { firmarToken, secretoAutoficha } from '../lib/autoficha.js';
 import { conReintentos } from '../lib/retry.js';
-import { obtenerHorariosConfig, logActividad } from '../lib/adminConfig.js';
+import { obtenerHorariosConfig, logActividad, obtenerReservaOnlinePausada } from '../lib/adminConfig.js';
 import { espejarTurnosBestEffort } from '../lib/espejoTurnos.js';
 import { agendaPrimariaActiva, escribirAgendaRpc, leerAgendaRpc } from '../lib/agendaSupabase.js';
 import { aTituloCase } from '../lib/pacientesSheet.js';
@@ -49,6 +49,11 @@ export default async function handler(req, res) {
   if (accion === 'buscar-email') return buscarEmailGuardado(req, res);
 
   try {
+    // La reserva online también se apaga en el servidor, no solo escondiendo el calendario en la
+    // pantalla: sin esto, un POST directo sacaba turnos aunque estuviera pausada (auditoría B7).
+    if (await obtenerReservaOnlinePausada()) {
+      return res.status(200).json({ success: false, message: 'La reserva online está desactivada por ahora. Escribinos por WhatsApp y te damos turno.' });
+    }
     const { date, time, nombre, apellido, telefono, dni, email, motivo, esNuevo } = req.body;
     const { slotMinutes } = await obtenerHorariosConfig();
     if (agendaPrimariaActiva()) {

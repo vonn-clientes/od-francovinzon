@@ -1380,6 +1380,7 @@ async function calcularFinanzasPacientes(forzar) {
   const ingresosPorDia = {};
   const pagos = []; // { fechaISO, monto }
   const cobrosMes = {};
+  const cobrosUsdMes = {}; // pagos en dólares: van aparte, nunca se mezclan con los pesos
   const escaneo = await escanearFichasAdmin(forzar);
   escaneo.fichas.forEach((f) => f.movimientos
     .filter((m) => m.fecha && m.haber && !/^\[ANULADO\]/.test(m.tratamiento))
@@ -1388,6 +1389,13 @@ async function calcularFinanzasPacientes(forzar) {
       if (!fechaISO) return;
       const monto = parsearMontoArgentino(m.haber);
       if (monto <= 0) return;
+      if (m.monedaHaber === 'USD') {
+        const k = fechaISO.slice(0, 7);
+        const u = (cobrosUsdMes[k] ||= { mes: k, cantidad: 0, total: 0 });
+        u.cantidad += 1;
+        u.total += monto;
+        return;
+      }
       ingresosPorDia[fechaISO] = (ingresosPorDia[fechaISO] || 0) + monto;
       pagos.push({ fechaISO, monto });
       // Cobros por forma de pago (efectivo / transferencias por titular / otras / sin dato)
@@ -1456,9 +1464,12 @@ async function calcularFinanzasPacientes(forzar) {
     cuentas: Object.fromEntries(Object.entries(f.cuentas).map(([k, v]) => [k, redondear(v)])),
   }));
 
+  const cobrosUsdPorMes = Object.values(cobrosUsdMes).sort((a, b) => a.mes.localeCompare(b.mes))
+    .map((u) => ({ mes: u.mes, cantidad: u.cantidad, total: redondear(u.total) }));
   const valor = {
     ingresosDiarios,
     cobrosPorFormaPago,
+    cobrosUsdPorMes,
     ticketPorMes,
     ticketPorAnio,
     dolarError,

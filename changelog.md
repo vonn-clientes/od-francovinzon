@@ -827,3 +827,7 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 - Candidatas: `getSinFicha` suma las fichas de Supabase que no tienen fila en consolidados (antes no aparecían, p. ej. Benjamin Schulman).
 - Asignar ficha a una persona sin DNI actualizaba la fila propia de la ficha (el RPC buscaba primero por ficha_id) y la persona seguía "sin ficha" aunque /admin decía OK. Ahora se manda el `id` exacto de la fila y se verifica después de guardar. Requiere la función de `supabase/consolidados_upsert_por_id.sql`.
 - Tareas de /gestion: un feriado marcado "Sí, se atiende" (marcador `feriado_atendido`) aparecía como "Reorganizar turnos" porque con la agenda en Supabase el marcador llega como `__tipo` y no en la descripción (caso 7/12/2026, 14 turnos). `buscar.js` ahora lo reconoce.
+
+## 2026-11-26 — Reserva online pausada en el servidor + dólares aparte en /admin
+- `api/reservar.js`: si la reserva online está pausada, el servidor rechaza crear turnos (antes solo se ocultaba en la pantalla).
+- `api/gestion/admin.js`: los cobros en USD ya no se suman a los pesos; se informan aparte (`cobrosUsdPorMes`) y `/admin` los muestra en una línea.

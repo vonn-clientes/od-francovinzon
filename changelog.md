@@ -845,3 +845,7 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 
 ## 2026-11-27 — "¿Es este paciente?" no pisa nombres distintos
 - `confirmarMatch`: solo completa un nombre (ficha o turno) si el más corto está contenido palabra por palabra en el más largo; si difieren, no cambia nada (`esExtensionDeNombre` en `lib/identidadTurno.js`).
+
+## 2026-11-27 — Campañas: los números se congelan al cerrar
+- Al finalizar una campaña se guarda un resumen (`resumenFinal`) con sus totales (pacientes nuevos, recurrentes, etc.); desde entonces no cambian aunque se creen fichas o se resuelvan casos después. La inversión y el costo por paciente nuevo sí se recalculan si se edita la pauta. Si se editan las fechas de una campaña cerrada, el resumen se vuelve a guardar.
+- Las campañas ya cerradas antes de este cambio no tienen resumen guardado y siguen calculándose en vivo.

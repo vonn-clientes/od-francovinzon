@@ -353,11 +353,14 @@ async function healthcheck(req, res) {
     try {
       const respaldo = await crearRespaldoDiario();
       resultados.respaldo = respaldo.ok ? 'ok' : 'error';
+      if (!respaldo.ok) {
+        await avisarFallo({ endpoint: 'healthcheck', detalle: 'Respaldo diario Supabase', error: new Error(`El respaldo no se creó (${respaldo.motivo || 'sin motivo'})`) });
+      }
     } catch (error) {
       resultados.respaldo = 'error';
       await avisarFallo({ endpoint: 'healthcheck', detalle: 'Respaldo diario Supabase', error });
     }
-    const huboFalloSupabase = resultados.asistencia === 'error' || resultados.supabase === 'error';
+    const huboFalloSupabase = resultados.asistencia === 'error' || resultados.supabase === 'error' || resultados.respaldo === 'error';
     return res.status(huboFalloSupabase ? 500 : 200).json({ ok: !huboFalloSupabase, ...resultados, hora: new Date().toISOString() });
   }
 

@@ -838,3 +838,7 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 ## 2026-11-27 — Feriado atendido (7/12) con agenda en Supabase
 - Migración `agenda_ignorar_feriado_atendido`: `consultorio_agenda_crear_turno` y `consultorio_agenda_mover` ya no tratan el marcador `feriado_atendido` como bloqueo (antes impedía dar turnos ese día).
 - `buscar.js?modo=feriados`: con agenda en Supabase ahora informa `atendido`/`bloqueado` reales (antes siempre false → el cartel no reflejaba el marcador).
+
+## 2026-11-27 — Identidad de pacientes más estricta
+- `normalizarDni()`: un DNI de relleno (menos de 6 dígitos o todos iguales, ej. 00000000) se trata como "sin DNI".
+- Migración `ficha_por_identidad_solo_dni_real`: `consultorio_ficha_por_identidad` ya no identifica por teléfono solo (el botón "Revisar mis datos" del link de confirmación solo aparece con DNI real y único).

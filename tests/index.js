@@ -23,3 +23,4 @@ import './pacientesClaveMovil.test.js';
 import './reservaPausadaYUsd.test.js';
 import './respaldoAlerta.test.js';
 import './feriadoAtendidoCartel.test.js';
+import './dniRelleno.test.js';

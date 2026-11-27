@@ -1221,6 +1221,8 @@
       document.getElementById('dash-cobros-cuentas').innerHTML = cobroActual && Object.keys(cobroActual.cuentas).length
         ? Object.entries(cobroActual.cuentas).sort(([, a], [, b]) => b - a).map(([k, v]) => `${escapeHtmlAdmin(k)}: <b>${fmtArs(v)}</b>`).join(' · ')
         : 'Sin transferencias este mes.';
+      const usdMes = (m.cobrosUsdPorMes || []).find((c) => c.mes === mesActualKey);
+      if (usdMes) document.getElementById('dash-cobros-cuentas').innerHTML += ` · Cobrado en dólares (aparte, no suma a los pesos): <b>${fmtUsd(usdMes.total)}</b>`;
 
       // (e) Ticket promedio
       document.querySelector('#dash-ticket-mensual tbody').innerHTML = (m.ticketPorMes || []).slice(-12).reverse().map((t) =>

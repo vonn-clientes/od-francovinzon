@@ -22,3 +22,4 @@ import './mobileFrontend.test.js';
 import './pacientesClaveMovil.test.js';
 import './reservaPausadaYUsd.test.js';
 import './respaldoAlerta.test.js';
+import './feriadoAtendidoCartel.test.js';

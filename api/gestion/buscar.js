@@ -280,7 +280,20 @@ async function feriadoDelDia(req, res) {
   try {
     const dateStr = req.query.date;
     const feriado = await esFeriado(dateStr);
-    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') return res.status(200).json({ feriado, atendido: false, bloqueado: false });
+    if (process.env.SUPABASE_AGENDA_PRIMARY === '1') {
+      let atendidoS = false;
+      let bloqueadoS = false;
+      if (feriado) {
+        const ini = toArgDate(dateStr, '00:00');
+        const fin = new Date(ini.getTime() + 24 * 60 * 60000);
+        const evs = await eventosAgenda(ini.toISOString(), fin.toISOString());
+        (evs || []).forEach((ev) => {
+          if (ev.__tipo === 'feriado_atendido') atendidoS = true;
+          else if (ev.__tipo === 'bloqueo') bloqueadoS = true;
+        });
+      }
+      return res.status(200).json({ feriado, atendido: atendidoS, bloqueado: bloqueadoS });
+    }
     const calendar = getCalendarClient();
     let atendido = false;
     let bloqueado = false;

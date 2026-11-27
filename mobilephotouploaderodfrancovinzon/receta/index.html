@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../mobile-auth.css">
 <style>
   :root {
     --navy: #1E3A5F; --gold: #D4A24C; --cream: #FAF9F6; --line: #E9E4D8;
@@ -52,6 +53,7 @@
   <div class="brand">
     <img src="../../assets/logo-horizontal.png" alt="Franco Vinzón Odontólogo">
     <h1>Receta</h1>
+    <button type="button" class="mobile-key-open" id="mobile-key-open">Clave de acceso</button>
   </div>
 
   <div class="card" id="card-cargando">
@@ -79,6 +81,7 @@
   </div>
 </div>
 
+<script src="../mobile-auth.js"></script>
 <script>
   function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -110,7 +113,7 @@
   async function cargar() {
     if (!codigo) { mostrarError('Falta el código de la receta en el link.'); return; }
     try {
-      const r = await fetch(`/api/gestion/pacientes?modo=receta-proceso&codigo=${encodeURIComponent(codigo)}`);
+      const r = await mobileFetch(`/api/gestion/pacientes?modo=receta-proceso&codigo=${encodeURIComponent(codigo)}`);
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
         mostrarError(err.error || 'No se pudo cargar la receta.');
@@ -165,7 +168,7 @@
   async function guardarYMostrarListo({ pacienteId, crearNuevo, nombreCompleto }) {
     document.getElementById('cargando-texto').textContent = 'Guardando la receta...';
     try {
-      const r = await fetch('/api/gestion/pacientes', {
+      const r = await mobileFetch('/api/gestion/pacientes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -201,7 +204,7 @@
     const url = `/api/gestion/pacientes?modo=receta-pdf&recetaId=${recetaGuardadaId}`;
     const msg = document.getElementById('listo-msg');
     try {
-      const resp = await fetch(url);
+      const resp = await mobileFetch(url);
       const blob = await resp.blob();
       const file = new File([blob], `Receta${nombreCompleto ? ' - ' + nombreCompleto : ''}.pdf`, { type: 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -210,6 +213,7 @@
       }
       const objectUrl = URL.createObjectURL(blob);
       window.open(objectUrl, '_blank');
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
     } catch {
       // AbortError = cerró el panel de compartir sin elegir nada, no es un error real
       msg.textContent = '';

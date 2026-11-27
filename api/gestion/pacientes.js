@@ -76,6 +76,13 @@ function claveValida(key) {
   return isValidGestionKey(key) || isValidAdminKey(key);
 }
 
+// Apagado por defecto: conserva el acceso móvil legado hasta la activación manual.
+function mobileRequiereClave() {
+  return process.env.MOBILE_REQUIERE_CLAVE === '1';
+}
+const MODOS_MOBILE = new Set(['hoy-publico', 'buscar-publico', 'fotos', 'foto-imagen', 'recetas', 'receta-pdf', 'receta-proceso']);
+const ACCIONES_MOBILE = new Set(['subir-foto', 'eliminar-foto', 'receta-procesar-pdf', 'receta-guardar']);
+
 // Dominio público para links y QR que ve el paciente (el que muestra la cámara al escanear):
 // siempre el dominio propio de VONN. Solo los previews de Vercel conservan su host para poder
 // probarlos; el *.vercel.app de producción nunca se muestra.
@@ -88,6 +95,14 @@ function baseUrlPublica(req) {
 
 export default async function handler(req, res) {
   try {
+    const esMobile = (req.method === 'GET' && MODOS_MOBILE.has(req.query?.modo))
+      || (req.method === 'POST' && ACCIONES_MOBILE.has(req.body?.accion));
+    if (mobileRequiereClave() && esMobile) {
+      res.setHeader('Cache-Control', 'private, no-store');
+      const key = req.headers?.['x-gestion-key'] ?? req.query?.key ?? req.body?.key;
+      if (!claveValida(key)) return res.status(401).json({ error: 'unauthorized' });
+    }
+
     // Callback de Google (siempre GET, sin `modo`, con `code` y `state`) — no lleva
     // GESTION_KEY porque viene del navegador del odontólogo después del consentimiento,
     // no de un fetch nuestro. El `state` es la propia GESTION_KEY: si no coincide, se
@@ -141,12 +156,7 @@ export default async function handler(req, res) {
       return await diagnosticoConsolidados(req, res);
     }
 
-    // Fotos de pacientes (/mobilephotouploaderodfrancovinzon, ver el pedido) — SIN
-    // clave a propósito (decisión explícita del usuario): la única protección es que
-    // la URL de esa página no es adivinable. Se acota el daño igual: buscar-publico
-    // nunca devuelve más que nombre/apellido/dni (nada financiero ni de contacto), y
-    // fotos/foto-imagen solo sirven lo que ya se subió como foto de paciente — mismo
-    // nivel de exposición que decidió aceptar el usuario para esa página entera.
+    // Fotos y recetas móviles: clave opcional controlada arriba por MOBILE_REQUIERE_CLAVE.
     // "Mis datos" (QR del paciente): público pero con token firmado que vale 3 h y abre
     // UNA sola ficha; solo expone/escribe los datos personales de lib/autoficha.js.
     if (req.method === 'GET' && req.query.modo === 'autoficha') return await autofichaLeer(req, res);
@@ -166,9 +176,6 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && req.query.modo === 'foto-imagen') {
       return await servirFotoImagen(req, res);
     }
-    // Recetas (mismo nivel de exposición que las fotos de arriba — decisión explícita
-    // del usuario, 2026-08-20: URL no adivinable como única protección, consistente con
-    // el resto de /mobile en vez de sumar un sistema de clave nuevo ahí).
     if (req.method === 'GET' && req.query.modo === 'recetas') {
       return await listarRecetas(req, res);
     }
@@ -216,14 +223,13 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && req.body.accion === 'eliminar-foto') {
       return await eliminarFoto(req, res);
     }
-    // Recetas — mismo nivel sin clave que subir-foto/eliminar-foto arriba (ver el
-    // comentario de modo=recetas más arriba en este mismo handler).
     if (req.method === 'POST' && req.body.accion === 'receta-procesar-pdf') {
       return await procesarRecetaPdf(req, res);
     }
     if (req.method === 'POST' && req.body.accion === 'receta-guardar') {
       return await guardarReceta(req, res);
     }
+    // El Atajo queda fuera del interruptor; conserva su flujo actual.
     if (req.method === 'POST' && req.body.accion === 'receta-recibir-shortcut') {
       return await recibirRecetaShortcut(req, res);
     }
@@ -2097,7 +2103,7 @@ async function servirFotoImagen(req, res) {
       { responseType: 'arraybuffer' }
     ));
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Cache-Control', mobileRequiereClave() ? 'private, no-store' : 'private, max-age=86400');
     res.status(200).send(Buffer.from(data));
   } catch (err) {
     console.error(err);
@@ -2141,11 +2147,8 @@ async function subirFoto(req, res) {
   }
 }
 
-// Borrar una foto vieja/repetida (ver el pedido, 2026-08-13) — SIN clave, mismo nivel
-// de exposición ya aceptado para toda esta página: el fotoId es un ID de Drive (largo,
-// no adivinable), así que la única forma de borrar una foto puntual es ya tenerla
-// cargada en pantalla (acá o en /pacientes, que reusa este mismo endpoint). No hay
-// papelera propia ni falta hace — son fotos de trabajo, no fichas.
+// Borrar una foto: el control opcional de clave se aplica en el handler.
+// No hay papelera propia: son fotos de trabajo, no fichas.
 async function eliminarFoto(req, res) {
   const { fotoId } = req.body;
   if (!fotoId) return res.status(400).json({ success: false, message: 'Falta fotoId.' });
@@ -2443,7 +2446,7 @@ async function servirRecetaPdf(req, res) {
       { responseType: 'arraybuffer' }
     ));
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Cache-Control', mobileRequiereClave() ? 'private, no-store' : 'private, max-age=86400');
     res.status(200).send(Buffer.from(data));
   } catch (err) {
     console.error(err);

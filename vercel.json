@@ -48,5 +48,16 @@
       "destination": "https://odfrancovinzon.vonn.com.ar/$1",
       "permanent": true
     }
+  ],
+  "headers": [
+    {
+      "source": "/mobilephotouploaderodfrancovinzon/:path*",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
+      ]
+    }
   ]
 }

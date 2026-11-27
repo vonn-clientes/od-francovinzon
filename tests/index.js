@@ -17,3 +17,5 @@ import './recetasSupabase.test.js';
 import './agendaSupabase.test.js';
 import './consolidadosSupabase.test.js';
 import './tramo9.test.js';
+import './mobileClave.test.js';
+import './mobileFrontend.test.js';

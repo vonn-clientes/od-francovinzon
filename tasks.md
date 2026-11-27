@@ -1,5 +1,13 @@
 # Pendientes activos
 
+**2026-11-26 — Clave móvil opcional (`seguridad/mobile-con-clave`, sin publicar a main)**
+- Hecho: interruptor apagado por defecto, clave por header con fallback query/body, diálogo compartido en ambas páginas móviles, miniaturas/visor autenticados con liberación de blobs, noindex y pruebas sin red (193 tests de la suite completa).
+- **Antes de activar:** resolver en otra tarea la compatibilidad de fotos/recetas de `/pacientes`, que hoy hace llamadas sin clave y usa imágenes directas. Esa página y `/gestion`, `/admin`, mis-datos, autoficha y turnos quedaron intactos por instrucción expresa. También revisar el uso de links de fotos compartidos: con protección activa ya no se abren sin clave.
+- **Pendiente: Fausto carga la clave en cada celular y después activa MOBILE_REQUIERE_CLAVE=1 en Vercel**, después de resolver la dependencia anterior y verificar el flujo con el interruptor encendido. El botón «Clave de acceso» permite guardar la clave con el interruptor aún apagado; en ese estado no se valida. La pantalla de receta comparte almacenamiento solo dentro del mismo origen/navegador.
+- Prueba operativa pendiente: buscar, subir/ver/borrar una foto y abrir/guardar/compartir una receta desde el Atajo en iPhone. Esta tarea solo ejecutó mocks/datos inventados, sin llamadas a APIs reales.
+- `receta-recibir-shortcut` permanece público y fuera del interruptor. Otros accesos públicos y sus controles están documentados en changelog.md (2026-11-26); no se modificaron.
+- Reversión del requisito: Fausto desactiva la variable (ausente o distinta de `1`). No se cambió ninguna variable en esta tarea.
+
 **2026-11-06 — CAMPAÑAS v2 (rama `campanas-v2`, NO publicada a main — falta tu OK)**: edición completa de campañas, varias inversiones, desglose por motivo, selector para resolver casos dudosos y exportación CSV/PDF sin nombres. Código y tests listos (33 tests de campañas en verde; la pantalla se probó con jsdom). Pendiente:
 1. ⏳ Probar en el preview de la rama (editar una campaña ya finalizada, cargar 2 inversiones y mirar el costo por paciente nuevo, abrir "casos sin resolver", exportar CSV/PDF) y recién ahí publicar a `main` (regla permanente).
 2. ⏳ Revisar la tabla "Turnos por motivo" con datos reales: si mucho cae en "Otros", abrir el desplegable de nombres (muestra qué hay en "Otros") y ajustar las categorías (`categorizarMotivo()` en `lib/campanasAnalisis.js`) o cargar los tratamientos que falten en "Listas desplegables".

@@ -6,6 +6,5 @@ Disallow: /admin/
 Disallow: /api/
 Disallow: /turno/
 Disallow: /t/
-Disallow: /mobilephotouploaderodfrancovinzon/
 
 Sitemap: https://odfrancovinzon.vonn.com.ar/sitemap.xml

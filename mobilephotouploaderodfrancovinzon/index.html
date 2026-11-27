@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="mobile-auth.css">
 <style>
   :root {
     --navy: #1E3A5F; --gold: #D4A24C; --cream: #FAF9F6; --line: #E9E4D8;
@@ -109,6 +110,7 @@
   <div class="brand">
     <img src="../assets/logo-horizontal.png" alt="Franco Vinzón Odontólogo">
     <h1>Fotos de pacientes</h1>
+    <button type="button" class="mobile-key-open" id="mobile-key-open">Clave de acceso</button>
   </div>
 
   <div class="card" id="card-buscar">
@@ -160,6 +162,7 @@
   </div>
 </div>
 
+<script src="mobile-auth.js"></script>
 <script>
   const cardBuscar = document.getElementById('card-buscar');
   const cardPaciente = document.getElementById('card-paciente');
@@ -224,7 +227,7 @@
 
   async function cargarPacientesHoy() {
     try {
-      const r = await fetch('/api/gestion/pacientes?modo=hoy-publico');
+      const r = await mobileFetch('/api/gestion/pacientes?modo=hoy-publico');
       const data = await r.json();
       pacientesHoy = Array.isArray(data) ? data : [];
       renderHoyLista();
@@ -251,7 +254,7 @@
 
   async function buscarPacientes(q) {
     try {
-      const r = await fetch(`/api/gestion/pacientes?modo=buscar-publico&q=${encodeURIComponent(q)}`);
+      const r = await mobileFetch(`/api/gestion/pacientes?modo=buscar-publico&q=${encodeURIComponent(q)}`);
       const resultados = await r.json();
       resultadosEl.innerHTML = resultados.map((p) => `
         <div class="resultado-row">
@@ -280,6 +283,8 @@
     cargarFotos();
   }
   document.getElementById('btn-cambiar-paciente').addEventListener('click', () => {
+    cargaFotos += 1;
+    liberarMiniaturas();
     pacienteActual = null;
     cardPaciente.classList.add('hidden');
     cardBuscar.classList.remove('hidden');
@@ -334,7 +339,7 @@
     btnSubir.textContent = 'Subiendo...';
     setMsg('', '');
     try {
-      const r = await fetch('/api/gestion/pacientes', {
+      const r = await mobileFetch('/api/gestion/pacientes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -362,22 +367,32 @@
   });
 
   // ---------- Fotos ya subidas ----------
+  let cargaFotos = 0;
+  function liberarMiniaturas() {
+    fotosGrid.querySelectorAll('img').forEach(mobileReleaseImage);
+  }
   async function cargarFotos() {
     if (!pacienteActual) return;
+    const carga = ++cargaFotos;
+    const pacienteId = pacienteActual.id;
     try {
-      const r = await fetch(`/api/gestion/pacientes?modo=fotos&id=${pacienteActual.id}`);
+      const r = await mobileFetch(`/api/gestion/pacientes?modo=fotos&id=${encodeURIComponent(pacienteId)}`);
       const fotos = await r.json();
+      if (carga !== cargaFotos || pacienteActual?.id !== pacienteId) return;
+      liberarMiniaturas();
       fotosActuales = fotos;
       fotosVacio.classList.toggle('hidden', fotos.length > 0);
       fotosGrid.innerHTML = fotos.map((f, i) => `
         <div class="foto-item" data-idx="${i}">
-          <img src="/api/gestion/pacientes?modo=foto-imagen&fotoId=${f.id}" alt="" loading="lazy">
+          <img alt="" loading="lazy">
           ${f.descripcion ? `<div class="desc">${escapeHtml(f.descripcion)}</div>` : ''}
           <div class="fecha">${new Date(f.fecha).toLocaleDateString('es-AR')}</div>
         </div>
       `).join('');
       fotosGrid.querySelectorAll('.foto-item').forEach((el) => {
-        el.addEventListener('click', () => abrirVisor(parseInt(el.dataset.idx, 10)));
+        const idx = parseInt(el.dataset.idx, 10);
+        mobileLoadImage(el.querySelector('img'), `/api/gestion/pacientes?modo=foto-imagen&fotoId=${encodeURIComponent(fotos[idx].id)}`);
+        el.addEventListener('click', () => abrirVisor(idx));
       });
     } catch {
       // sin conexión: se queda con lo que ya había, no rompe la pantalla
@@ -390,7 +405,7 @@
     if (!f) return;
     const url = `/api/gestion/pacientes?modo=foto-imagen&fotoId=${f.id}`;
     const fechaTexto = new Date(f.fecha).toLocaleDateString('es-AR');
-    visorImg.src = url;
+    mobileLoadImage(visorImg, url);
     visorDesc.textContent = f.descripcion || '';
     visorFecha.textContent = fechaTexto;
     visorOverlay.dataset.url = url;
@@ -402,7 +417,7 @@
   }
   function cerrarVisor() {
     visorOverlay.classList.add('hidden');
-    visorImg.src = '';
+    mobileReleaseImage(visorImg);
   }
   document.getElementById('visor-cerrar').addEventListener('click', cerrarVisor);
   visorOverlay.addEventListener('click', (e) => { if (e.target === visorOverlay) cerrarVisor(); });
@@ -417,7 +432,7 @@
     const textoCompartir = visorOverlay.dataset.compartirTexto || 'Foto de paciente';
     try {
       if (navigator.canShare) {
-        const resp = await fetch(url);
+        const resp = await mobileFetch(url);
         const blob = await resp.blob();
         const file = new File([blob], 'foto-paciente.jpg', { type: blob.type || 'image/jpeg' });
         if (navigator.canShare({ files: [file] })) {
@@ -446,7 +461,7 @@
     btn.disabled = true;
     btn.textContent = 'Borrando...';
     try {
-      const r = await fetch('/api/gestion/pacientes', {
+      const r = await mobileFetch('/api/gestion/pacientes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion: 'eliminar-foto', fotoId }),

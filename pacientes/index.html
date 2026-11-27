@@ -807,6 +807,36 @@
 
 <script>
   let gestionKey = sessionStorage.getItem('gestionKey') || '';
+  // Fotos y recetas: mandan la clave en un header (nunca en la URL). Mientras el servidor tenga
+  // MOBILE_REQUIERE_CLAVE apagada la ignora; cuando se prenda, /pacientes sigue andando igual.
+  function fetchMovil(url, opts = {}) {
+    const headers = new Headers(opts.headers);
+    headers.set('x-gestion-key', gestionKey);
+    return fetch(url, { ...opts, headers });
+  }
+  const blobsImagen = new WeakMap();
+  function liberarImagen(img) {
+    const u = blobsImagen.get(img);
+    if (u) URL.revokeObjectURL(u);
+    blobsImagen.delete(img);
+    delete img.dataset.pedida;
+    img.removeAttribute('src');
+  }
+  async function cargarImagenAutenticada(img, url) {
+    liberarImagen(img);
+    img.dataset.pedida = url;
+    try {
+      const r = await fetchMovil(url);
+      if (!r.ok) throw new Error('imagen');
+      const blob = await r.blob();
+      if (img.dataset.pedida !== url) return; // se cerró el visor o cambió la ficha
+      const objUrl = URL.createObjectURL(blob);
+      blobsImagen.set(img, objUrl);
+      img.src = objUrl;
+    } catch {
+      if (img.dataset.pedida === url) img.alt = 'No se pudo cargar la foto.';
+    }
+  }
   let pacientes = [];
   let fichaActual = null; // { id, campos, financiero, movimientos, driveModifiedTime }
   let formulariosListos = false; // pasa a true cuando los const de los forms existen
@@ -2458,19 +2488,22 @@
     const vacio = document.getElementById('fotos-vacio');
     grid.innerHTML = '<p class="hint">Cargando...</p>';
     vacio.classList.add('hidden');
+    grid.querySelectorAll('img').forEach(liberarImagen);
     try {
-      const r = await fetch(`/api/gestion/pacientes?modo=fotos&id=${fichaActual.id}`);
+      const r = await fetchMovil(`/api/gestion/pacientes?modo=fotos&id=${fichaActual.id}`);
       const fotos = await r.json();
       fotosFichaActuales = fotos;
       vacio.classList.toggle('hidden', fotos.length > 0);
       grid.innerHTML = fotos.map((f, i) => `
         <div class="foto-item" data-idx="${i}">
-          <img src="/api/gestion/pacientes?modo=foto-imagen&fotoId=${f.id}" alt="" loading="lazy">
+          <img alt="" loading="lazy">
           ${f.descripcion ? `<div class="desc">${escapeHtml(f.descripcion)}</div>` : ''}
           <div class="fecha">${new Date(f.fecha).toLocaleDateString('es-AR')}</div>
         </div>
       `).join('');
       grid.querySelectorAll('.foto-item').forEach((el) => {
+        const f = fotosFichaActuales[parseInt(el.dataset.idx, 10)];
+        cargarImagenAutenticada(el.querySelector('img'), `/api/gestion/pacientes?modo=foto-imagen&fotoId=${f.id}`);
         el.addEventListener('click', () => abrirVisorFoto(fotosFichaActuales[parseInt(el.dataset.idx, 10)]));
       });
     } catch {
@@ -2490,7 +2523,7 @@
     if (!f) return;
     const url = `/api/gestion/pacientes?modo=foto-imagen&fotoId=${f.id}`;
     const fechaTexto = new Date(f.fecha).toLocaleDateString('es-AR');
-    visorImg.src = url;
+    cargarImagenAutenticada(visorImg, url);
     visorDesc.textContent = f.descripcion || '';
     visorFecha.textContent = fechaTexto;
     visorOverlay.dataset.url = url;
@@ -2501,7 +2534,7 @@
   }
   function cerrarVisorFoto() {
     visorOverlay.classList.add('hidden');
-    visorImg.src = '';
+    liberarImagen(visorImg);
   }
   document.getElementById('visor-cerrar').addEventListener('click', cerrarVisorFoto);
   visorOverlay.addEventListener('click', (e) => { if (e.target === visorOverlay) cerrarVisorFoto(); });
@@ -2512,7 +2545,7 @@
     const textoCompartir = visorOverlay.dataset.compartirTexto || 'Foto de paciente';
     try {
       if (navigator.canShare) {
-        const resp = await fetch(url);
+        const resp = await fetchMovil(url);
         const blob = await resp.blob();
         const file = new File([blob], 'foto-paciente.jpg', { type: blob.type || 'image/jpeg' });
         if (navigator.canShare({ files: [file] })) {
@@ -2544,7 +2577,7 @@
     const btn = document.getElementById('visor-borrar');
     setBtnLoading(btn);
     try {
-      const r = await fetch('/api/gestion/pacientes', {
+      const r = await fetchMovil('/api/gestion/pacientes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion: 'eliminar-foto', fotoId }),
@@ -2607,7 +2640,7 @@
     fotosSubirBtn.textContent = 'Subiendo...';
     setFotosMsg('', '');
     try {
-      const r = await fetch('/api/gestion/pacientes', {
+      const r = await fetchMovil('/api/gestion/pacientes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2680,7 +2713,7 @@
     lista.innerHTML = '<p class="hint">Cargando...</p>';
     vacio.classList.add('hidden');
     try {
-      const r = await fetch(`/api/gestion/pacientes?modo=recetas&id=${fichaActual.id}`);
+      const r = await fetchMovil(`/api/gestion/pacientes?modo=recetas&id=${fichaActual.id}`);
       const recetas = await r.json();
       vacio.classList.toggle('hidden', recetas.length > 0);
       lista.innerHTML = recetas.map((rc) => `
@@ -2704,7 +2737,7 @@
     const url = `/api/gestion/pacientes?modo=receta-pdf&recetaId=${recetaId}`;
     const nombreCompleto = `${fichaActual.campos.nombre} ${fichaActual.campos.apellido}`.trim();
     try {
-      const resp = await fetch(url);
+      const resp = await fetchMovil(url);
       const blob = await resp.blob();
       const file = new File([blob], `Receta - ${nombreCompleto}.pdf`, { type: 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2728,7 +2761,7 @@
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const r = await fetch('/api/gestion/pacientes', {
+        const r = await fetchMovil('/api/gestion/pacientes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accion: 'receta-procesar-pdf', pdfBase64: e.target.result }),
@@ -2861,7 +2894,7 @@
     setBtnLoading(btn, 'Guardando...');
     msg.classList.add('hidden');
     try {
-      const r = await fetch('/api/gestion/pacientes', {
+      const r = await fetchMovil('/api/gestion/pacientes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion: 'receta-guardar', pacienteId: fichaActual.id, receta }),

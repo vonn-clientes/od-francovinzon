@@ -19,3 +19,4 @@ import './consolidadosSupabase.test.js';
 import './tramo9.test.js';
 import './mobileClave.test.js';
 import './mobileFrontend.test.js';
+import './pacientesClaveMovil.test.js';

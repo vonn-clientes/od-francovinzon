@@ -831,3 +831,6 @@ Maria Eugenia Galotto 1/1, etc. Queda el cron diario de 5:30 para mantenerlo act
 ## 2026-11-26 — Reserva online pausada en el servidor + dólares aparte en /admin
 - `api/reservar.js`: si la reserva online está pausada, el servidor rechaza crear turnos (antes solo se ocultaba en la pantalla).
 - `api/gestion/admin.js`: los cobros en USD ya no se suman a los pesos; se informan aparte (`cobrosUsdPorMes`) y `/admin` los muestra en una línea.
+
+## 2026-11-26 — Respaldo diario: avisa si no se crea
+- `healthcheck`: si el respaldo diario devuelve "no ok" ahora manda alerta (`avisarFallo`) y el cron marca error, en vez de pasar en silencio.

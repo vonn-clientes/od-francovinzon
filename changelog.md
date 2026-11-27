@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-26 — /pacientes manda la clave en fotos y recetas (rama `seguridad/pacientes-manda-clave`)
+- `/pacientes` envía `x-gestion-key` (header, nunca en la URL) en fotos y recetas: listar, ver, subir, borrar, procesar y guardar. Las miniaturas y el visor cargan por fetch + blob. Con `MOBILE_REQUIERE_CLAVE` apagada no cambia nada para el consultorio; es el paso previo a prenderla.
+- Test nuevo `tests/pacientesClaveMovil.test.js` (104 tests en verde).
+- Pendiente antes de prender la variable: Fausto carga la clave en cada celular (`/mobilephotouploaderodfrancovinzon/`) y recién ahí `MOBILE_REQUIERE_CLAVE=1` en Vercel.
+
 ## 2026-11-26 — Clave móvil opcional (rama `seguridad/mobile-con-clave`, sin merge ni deploy manual)
 - `mobileRequiereClave()` exige exactamente `MOBILE_REQUIERE_CLAVE=1`. Apagado/sin definir conserva el comportamiento previo. Encendido protege GET `hoy-publico`, `buscar-publico`, `fotos`, `foto-imagen`, `recetas`, `receta-pdf`, `receta-proceso` y POST `subir-foto`, `eliminar-foto`, `receta-procesar-pdf`, `receta-guardar`. Reutiliza `claveValida` (GESTION_KEY o ADMIN_KEY), con precedencia header `x-gestion-key`, query `key`, body `key`; un header presente pero inválido no permite fallback. Rechazo 401 `{error:'unauthorized'}` antes de cualquier acceso externo. Con protección activa las respuestas no se cachean.
 - Las dos páginas móviles comparten `mobile-auth.js` y `mobile-auth.css`: clave `mobile_key` en localStorage con try/catch y respaldo en memoria, header en todos los fetch, un único diálogo ante 401 simultáneos y reintento de la misma petición después de ingresarla. No reintenta fallos de red/500. Botón «Clave de acceso» para preparar cada celular antes de encender el interruptor.
